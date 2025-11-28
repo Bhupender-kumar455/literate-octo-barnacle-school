@@ -1,7 +1,7 @@
 export enum UserRole {
-  SUPER_ADMIN = 'superadmin',
-  ADMIN = 'admin', // Principal
-  TEACHER = 'teacher'
+  SUPER_ADMIN = "superadmin",
+  ADMIN = "admin", // Principal
+  TEACHER = "teacher",
 }
 
 export interface User {
@@ -11,17 +11,35 @@ export interface User {
   role: UserRole;
   avatar?: string;
   phone?: string;
+  school_id?: string;
+}
+
+export interface Teacher extends User {
+  id: string;
+  department: string;
+  logo?: string;
+  address?: string;
+  joinDate?: string;
+  is_active?: boolean;
 }
 
 export interface School {
   id: string;
   name: string;
+  school_name?: string; // API response alias
   address: string;
   phone: string;
   logo: string;
   created_by: string; // user.id
   studentCount: number;
+  student_count?: number; // API response alias
   principalName: string;
+  principal_name?: string; // API response alias
+  principal_email?: string;
+  status?: number; // 1: Active, 2: Inactive, 3: Suspended
+  plan_type?: string;
+  subscription_end?: string;
+  storage_limit_gb?: number;
 }
 
 export interface ClassGroup {
@@ -54,18 +72,18 @@ export interface Student {
   admission_no: string;
   roll_number: string;
   name: string;
-  gender: 'Male' | 'Female' | 'Other';
+  gender: "Male" | "Female" | "Other";
   dob: string;
   guardian_name: string;
   guardian_phone: string;
-  fees_status: 'Paid' | 'Pending' | 'Overdue';
+  fees_status: "Paid" | "Pending" | "Overdue";
 }
 
 export interface AttendanceRecord {
   id: string;
   student_id: string;
   date: string;
-  status: 'Present' | 'Absent' | 'Late';
+  status: "Present" | "Absent" | "Late";
   marked_by: string; // teacher.id
   remarks?: string;
 }
@@ -75,7 +93,7 @@ export interface Announcement {
   title: string;
   message: string;
   date: string;
-  type: 'info' | 'alert' | 'success';
+  type: "info" | "alert" | "success";
 }
 
 // For the UI flow

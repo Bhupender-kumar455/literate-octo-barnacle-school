@@ -116,21 +116,21 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
   >("general");
   const [maintenanceMode, setMaintenanceMode] = useState(false);
 
-  useEffect(() => {
-    const fetchSchools = async () => {
-      try {
-        const res = await fetch(`${API_BASE_URL}/api/superadmin/schools/all`, {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-        });
-        const data = await res.json();
-        setSchools(data);
-      } catch (error) {
-        console.error("Failed to fetch schools:", error);
-      }
-    };
+  const fetchSchools = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/superadmin/schools/all`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
+      });
+      const data = await res.json();
+      setSchools(data);
+    } catch (error) {
+      console.error("Failed to fetch schools:", error);
+    }
+  };
 
+  useEffect(() => {
     fetchSchools();
     return () => { };
   }, []);
@@ -140,9 +140,43 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
   };
 
 
-  const handleSaveSchool = () => {
-    toast.success("School details updated successfully");
-    setManagingSchool(null);
+  const handleSaveSchool = async () => {
+    if (!managingSchool) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/superadmin/schools/${managingSchool.school_id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
+        body: JSON.stringify({
+          logo: managingSchool.logo,
+          school_name: managingSchool.school_name,
+          phone: managingSchool.phone,
+          address: managingSchool.address,
+          principal_name: managingSchool.principal_name,
+          principal_email: managingSchool.principal_email,
+          status: managingSchool.status,
+          school_id: managingSchool.school_id,
+          user__id: managingSchool.user__id,
+          plan_type: managingSchool.plan_type,
+          storage_limit_gb: managingSchool.storage_limit_gb,
+        }),
+      });
+
+      const result = await res.json();
+
+      if (res.ok) {
+        toast.success(result.message || "School details updated successfully");
+        fetchSchools(); // Refresh list
+        setManagingSchool(null);
+      } else {
+        toast.error(result.message || "Failed to update school");
+      }
+    } catch (error) {
+      console.error("Update error:", error);
+      toast.error("Failed to connect to server");
+    }
   };
 
   const handleImpersonateLogin = () => {
@@ -399,7 +433,9 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
               <div className="flex items-start justify-between mb-6">
                 <div className="flex items-center gap-4">
                   <img
-                    src={school.logo}
+                    src={
+                      school.logo
+                    }
                     alt={school.name}
                     className="w-16 h-16 rounded-xl object-cover bg-slate-100 shadow-sm group-hover:scale-105 transition-transform"
                   />
@@ -535,7 +571,6 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
                         body: JSON.stringify(data),
                       }
                     );
-                    console.log("data->", data);
 
                     const result = await res.json();
                     if (res.ok) {
@@ -543,6 +578,7 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
                       toast.success(
                         `Principal: ${data.principal_email} | Pass: ${data.principal_password}`
                       );
+                      fetchSchools(); // Refresh list
                       setShowCreateModal(false);
                     } else {
                       toast.error(result.message || "Failed to create school");
@@ -596,7 +632,11 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
                     {logoUrl ? (
                       <div className="w-32 h-32 rounded-2xl border-4 border-slate-300 dark:border-slate-700 overflow-hidden relative group-hover:border-indigo-500 transition-all">
                         <img
-                          src={logoUrl}
+                          src={
+                            logoUrl.startsWith("http")
+                              ? logoUrl
+                              : `${API_BASE_URL}${logoUrl}`
+                          }
                           alt="Logo Preview"
                           className="w-full h-full object-cover"
                         />
@@ -683,7 +723,8 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
               {/* Header */}
               <div className="px-8 py-6 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between bg-slate-50/50 dark:bg-slate-900/50">
                 <div className="flex items-center gap-4">
-                  <img src={managingSchool.logo} className="w-14 h-14 rounded-xl bg-white shadow-sm object-cover" alt="logo" />
+                  <img src={
+                    managingSchool.logo} className="w-14 h-14 rounded-xl bg-white shadow-sm object-cover" alt="logo" />
                   <div>
                     <h3 className="text-xl font-bold text-slate-900 dark:text-white">Manage Institution</h3>
                     <p className="text-sm text-slate-500">Configure settings for {managingSchool.school_name}</p>
@@ -723,18 +764,99 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
                   {manageTab === 'details' && (
                     <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
                       <h4 className="font-bold text-lg mb-4">School Profile</h4>
+
+                      {/* Logo Upload Section */}
+                      <div className="flex justify-center mb-6">
+                        <label htmlFor="manage-logo-upload" className="cursor-pointer group">
+                          <input
+                            id="manage-logo-upload"
+                            name="logo"
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+
+                              const formData = new FormData();
+                              formData.append("logo", file);
+
+                              try {
+                                const res = await fetch(
+                                  `${API_BASE_URL}/api/superadmin/schools/logo`,
+                                  {
+                                    method: "POST",
+                                    headers: {
+                                      Authorization: `Bearer ${localStorage.getItem("token")}`,
+                                    },
+                                    body: formData,
+                                  }
+                                );
+                                const data = await res.json();
+                                if (res.ok) {
+                                  setManagingSchool({ ...managingSchool, logo: data.url });
+                                  toast.success("Logo uploaded successfully");
+                                } else {
+                                  toast.error("Logo upload failed");
+                                }
+                              } catch (err) {
+                                toast.error("Error uploading logo");
+                              }
+                            }}
+                          />
+                          <div className="w-32 h-32 rounded-2xl border-4 border-slate-300 dark:border-slate-700 overflow-hidden relative group-hover:border-indigo-500 transition-all">
+                            <img
+                              src={
+                                managingSchool.logo
+                              }
+                              alt="School Logo"
+                              className="w-full h-full object-cover"
+                            />
+                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                              <p className="text-white text-xs font-medium">
+                                Change Logo
+                              </p>
+                            </div>
+                          </div>
+                        </label>
+                      </div>
+
                       <div className="grid grid-cols-2 gap-6">
                         <div className="col-span-2">
-                          <Input label="School Name" defaultValue={managingSchool.school_name} />
+                          <Input
+                            label="School Name"
+                            value={managingSchool.school_name}
+                            onChange={(e) => setManagingSchool({ ...managingSchool, school_name: e.target.value })}
+                          />
                         </div>
-                        <Input label="Phone Number" defaultValue={managingSchool.phone} icon={Phone} />
-                        <Input label="Address" defaultValue={managingSchool.address} icon={MapPin} />
+                        <Input
+                          label="Phone Number"
+                          value={managingSchool.phone}
+                          onChange={(e) => setManagingSchool({ ...managingSchool, phone: e.target.value })}
+                          icon={Phone}
+                        />
+                        <Input
+                          label="Address"
+                          value={managingSchool.address}
+                          onChange={(e) => setManagingSchool({ ...managingSchool, address: e.target.value })}
+                          icon={MapPin}
+                        />
 
                         <div className="col-span-2 border-t border-slate-100 dark:border-slate-800 my-2"></div>
 
                         <h4 className="font-bold text-lg mb-2 col-span-2">Primary Contact</h4>
-                        <Input label="Principal Name" defaultValue={managingSchool.principal_name} icon={UserCog} />
-                        <Input label="Principal Email" defaultValue={managingSchool.principal_email} icon={Mail} />
+                        <Input
+                          label="Principal Name"
+                          value={managingSchool.principal_name}
+                          onChange={(e) => setManagingSchool({ ...managingSchool, principal_name: e.target.value })}
+                          icon={UserCog}
+                        />
+                        <Input
+                          label="Principal Email"
+                          value={managingSchool.principal_email}
+                          onChange={(e) => setManagingSchool({ ...managingSchool, principal_email: e.target.value })}
+                          icon={Mail}
+                        />
                       </div>
                     </div>
                   )}
@@ -745,31 +867,67 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
 
                       <div className="p-4 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800/50 flex justify-between items-center">
                         <div>
-                          <p className="text-indigo-900 dark:text-indigo-200 font-bold">Enterprise Plan</p>
-                          <p className="text-xs text-indigo-600 dark:text-indigo-400">Next billing date: Oct 24, 2025</p>
+                          <p className="text-indigo-900 dark:text-indigo-200 font-bold">{managingSchool.plan_type ? (managingSchool.plan_type.charAt(0).toUpperCase() + managingSchool.plan_type.slice(1).toLowerCase()) : "Starter"} Plan</p>
+                          <p className="text-xs text-indigo-600 dark:text-indigo-400">Next billing date: {managingSchool.subscription_end}</p>
                         </div>
-                        <Badge variant="success">Active</Badge>
+                        <Badge
+                          variant={
+                            managingSchool.status === 1
+                              ? "success"
+                              : managingSchool.status === 2
+                                ? "warning"
+                                : "destructive"
+                          }
+                        >
+                          {managingSchool.status === 1
+                            ? "Active"
+                            : managingSchool.status === 2
+                              ? "Inactive"
+                              : "Suspended"}
+                        </Badge>
                       </div>
 
                       <div className="grid grid-cols-2 gap-6">
                         <div>
                           <label className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5 block">Account Status</label>
-                          <select className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-800">
-                            <option>Active</option>
-                            <option>Suspended</option>
-                            <option>Grace Period</option>
+                          <select
+                            value={managingSchool.status === 1 ? "Active" : managingSchool.status === 2 ? "Inactive" : "Suspended"}
+                            onChange={(e) => {
+                              const statusMap: { [key: string]: number } = { "Active": 1, "Inactive": 2, "Suspended": 3 };
+                              setManagingSchool({ ...managingSchool, status: statusMap[e.target.value] });
+                            }}
+                            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-800"
+                          >
+                            <option value="Active">Active</option>
+                            <option value="Suspended">Suspended</option>
+                            <option value="Inactive">Inactive</option>
                           </select>
                         </div>
                         <div>
                           <label className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5 block">Plan Type</label>
-                          <select className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-800">
-                            <option>Enterprise</option>
-                            <option>Growth</option>
-                            <option>Starter</option>
+                          <select
+                            value={managingSchool.plan_type ? (managingSchool.plan_type.charAt(0).toUpperCase() + managingSchool.plan_type.slice(1).toLowerCase()) : "Starter"}
+                            onChange={(e) => setManagingSchool({ ...managingSchool, plan_type: e.target.value })}
+                            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-800"
+                          >
+                            <option value="Enterprise">Enterprise</option>
+                            <option value="Growth">Growth</option>
+                            <option value="Starter">Starter</option>
                           </select>
                         </div>
-                        <Input label="Max Students" type="number" defaultValue={String(managingSchool.studentCount + 500)} />
-                        <Input label="Storage Limit (GB)" type="number" defaultValue="100" />
+                        <Input
+                          label="Max Students"
+                          disabled
+                          type="number"
+                          value={String(managingSchool.student_count)}
+                          onChange={(e) => setManagingSchool({ ...managingSchool, student_count: Number(e.target.value) })}
+                        />
+                        <Input
+                          label="Storage Limit (GB)"
+                          type="number"
+                          value={String(managingSchool.storage_limit_gb)}
+                          onChange={(e) => setManagingSchool({ ...managingSchool, storage_limit_gb: Number(e.target.value) })}
+                        />
                       </div>
                     </div>
                   )}

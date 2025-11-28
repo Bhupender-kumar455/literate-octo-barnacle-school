@@ -24,7 +24,6 @@ app.use('/api/teacher/attendance', require('./Routers/teacher/attendance'));
 
 app.use('/api/auth', require('./Routers/Login'));
 
-app.use('/api/superadmin/schools', require('./Routers/superadmin/schools'));
 
 app.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);

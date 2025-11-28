@@ -33,6 +33,10 @@ BEGIN
         address NVARCHAR(MAX) NULL,
         phone VARCHAR(15) NULL,
         logo nvarchar(max) NULL,
+         plan_type VARCHAR(50) DEFAULT 'starter',
+    storage_limit_gb INT DEFAULT 50,
+    subscription_start DATE NULL,
+    subscription_end DATE NULL,
         created_by BIGINT NOT NULL,
         created_at DATETIME DEFAULT GETDATE(),
         CONSTRAINT FK_schools_created_by FOREIGN KEY (created_by) REFERENCES users(id)
@@ -64,6 +68,9 @@ BEGIN
         id BIGINT IDENTITY(1,1) PRIMARY KEY,
         user_id BIGINT UNIQUE NOT NULL,
         school_id BIGINT NOT NULL,
+        logo nvarchar(max) not null default '',
+        address nvarchar(max) not null default '',
+        joinDate nvarchar(100) not null default '',
         employee_id VARCHAR(50) UNIQUE NULL,
         department VARCHAR(100) NULL,
         created_by BIGINT NOT NULL,
@@ -214,15 +221,20 @@ CREATE PROCEDURE [dbo].[GETALLSCHOOL]
 AS
 BEGIN
  SELECT 
-    s.id,
+    s.id as school_id,
     s.name AS school_name,
     s.address,
     s.logo,
+    s.plan_type,
+    s.storage_limit_gb,
+    s.subscription_start,
+    s.subscription_end,
     ISNULL(st.total_students, 0) AS student_count,
     u.name AS principal_name,
     u.email AS principal_email,
     u.is_active as status,
-    u.phone
+    u.phone,
+    u.id as user__id
 FROM schools s
 LEFT JOIN admins a ON s.id = a.school_id
 LEFT JOIN users u ON a.user_id = u.id
@@ -233,5 +245,55 @@ LEFT JOIN (
 ) st ON s.id = st.school_id
 ORDER BY s.name;
 END
+GO
 
+
+IF OBJECT_ID(N'[dbo].[UpdateSchoolAndUser]', N'P') IS NOT NULL
+    DROP PROCEDURE [dbo].[UpdateSchoolAndUser]
+GO
+CREATE PROCEDURE dbo.UpdateSchoolAndUser
+(
+    @school_id INT,
+    @address NVARCHAR(255),
+    @logo NVARCHAR(max),
+    @phone NVARCHAR(50),
+    @plan_type NVARCHAR(50),
+    @storage_limit_gb INT,
+    @school_name NVARCHAR(100),
+    @user_id INT,
+    @user_email NVARCHAR(255),
+    @user_name NVARCHAR(255),
+    @user_phone NVARCHAR(50),
+    @is_active INT
+)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    BEGIN TRY
+        BEGIN TRANSACTION;
+        UPDATE schools
+        SET 
+            address = @address,
+            logo = @logo,
+            phone = @phone,
+            name = @school_name,
+            plan_type = @plan_type,
+            storage_limit_gb = @storage_limit_gb
+        WHERE id = @school_id;
+
+        UPDATE users
+        SET 
+            email = @user_email,
+            name = @user_name,
+            phone = @user_phone,
+            is_active = @is_active
+        WHERE id = @user_id;
+
+        COMMIT TRANSACTION;
+    END TRY
+    BEGIN CATCH
+        ROLLBACK TRANSACTION;
+        THROW;
+    END CATCH
+END
 GO
