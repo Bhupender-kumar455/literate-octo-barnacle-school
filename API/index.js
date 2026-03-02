@@ -3,6 +3,7 @@ const cors = require('cors');
 const path = require('path');
 const { startNotificationWorker, stopNotificationWorker } = require('./services/notificationWorker');
 const fs = require('fs');
+require('./config/env');
 
 const app = express();
 

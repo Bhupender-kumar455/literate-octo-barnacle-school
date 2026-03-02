@@ -4,10 +4,11 @@ const { upload, convertFileToBase64, formatUploadError } = require('../../utils/
 const { poolPromise, sql } = require('../../config/db');
 const { protect, restrictTo } = require('../../middleware/auth');
 const multer = require('multer');
-const xlsx = require('xlsx');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const { audit } = require('../../middleware/audit');
+const { validateStrongPassword } = require('../../utils/password');
+const { parseSpreadsheetRows } = require('../../utils/spreadsheet');
 
 router.use(protect, restrictTo('admin'));
 
@@ -20,10 +21,10 @@ const bulkUpload = multer({
         const isExcelOrCsv = mimetype.includes('spreadsheet')
             || mimetype.includes('excel')
             || mimetype.includes('csv')
-            || /\.(xlsx|xls|csv)$/.test(originalname);
+            || /\.(xlsx|csv)$/.test(originalname);
 
         if (!isExcelOrCsv) {
-            return cb(new Error('Only CSV/Excel files allowed!'));
+            return cb(new Error('Only CSV/XLSX files allowed!'));
         }
         return cb(null, true);
     }
@@ -107,11 +108,15 @@ router.post('/logo', (req, res) => {
 router.post('/', audit('create_teacher', 'teacher'), async (req, res) => {
     const { name, email, password, department, logo, phone, status, address, joinDate } = req.body;
 
-    if (!name || !email) {
-        return res.status(400).json({ message: 'Name and email are required' });
+    if (!name || !email || !password) {
+        return res.status(400).json({ message: 'Name, email, and password are required' });
     }
 
     const normalizedEmail = String(email).trim().toLowerCase();
+    const passwordValidation = validateStrongPassword(password);
+    if (!passwordValidation.ok) {
+        return res.status(400).json({ message: passwordValidation.message });
+    }
     const isActive = status === undefined
         ? 1
         : (String(status).toLowerCase() === 'active' || status === 1 || status === true) ? 1 : 0;
@@ -122,7 +127,7 @@ router.post('/', audit('create_teacher', 'teacher'), async (req, res) => {
     let transaction;
     try {
         const pool = await poolPromise;
-        const hashed = await bcrypt.hash(password || 'Welcome123', 10);
+        const hashed = await bcrypt.hash(String(password), 10);
 
         transaction = pool.transaction();
         await transaction.begin();
@@ -172,14 +177,7 @@ router.post('/bulk', audit('bulk_upload_teachers', 'teacher'), bulkUpload.single
     let transaction;
 
     try {
-        const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
-        const firstSheetName = workbook.SheetNames[0];
-        if (!firstSheetName) {
-            return res.status(400).json({ message: 'File has no worksheets' });
-        }
-
-        const sheet = workbook.Sheets[firstSheetName];
-        const rows = xlsx.utils.sheet_to_json(sheet, { defval: '' });
+        const rows = await parseSpreadsheetRows(req.file);
         if (!rows.length) {
             return res.status(400).json({ message: 'File has no data rows' });
         }
@@ -194,24 +192,23 @@ router.post('/bulk', audit('bulk_upload_teachers', 'teacher'), bulkUpload.single
 
         for (let i = 0; i < rows.length; i++) {
             const rowNumber = i + 2;
-            const rawRow = rows[i] || {};
-            const row = {};
-            Object.keys(rawRow).forEach((key) => {
-                row[String(key).trim().toLowerCase()] = rawRow[key];
-            });
+            const row = rows[i] || {};
 
             try {
-                const name = String(row.name || row['teacher name'] || row.teacher_name || '').trim();
-                const email = String(row.email || row['email address'] || '').trim().toLowerCase();
-                const password = String(row.password || '').trim() || 'Welcome123';
-                const phone = String(row.phone || row.mobile || row['phone number'] || '').trim();
+                const name = String(row.name || row.teacher_name || '').trim();
+                const email = String(row.email || row.email_address || '').trim().toLowerCase();
+                const password = String(row.password || '').trim();
+                const phone = String(row.phone || row.mobile || row.phone_number || '').trim();
                 const department = String(row.department || row.subject || row.specialization || '').trim();
                 const address = String(row.address || '').trim();
-                const joinDate = normalizeJoinDate(row.joindate || row.join_date || row['join date'] || row.joining_date);
+                const joinDate = normalizeJoinDate(row.joindate || row.join_date || row.joining_date);
                 const isActive = normalizeActiveFlag(row.status || row.is_active || row.active);
 
                 if (!name) throw new Error('name is required');
                 if (!email) throw new Error('email is required');
+                if (!password) throw new Error('password is required');
+                const passwordValidation = validateStrongPassword(password);
+                if (!passwordValidation.ok) throw new Error(passwordValidation.message);
                 if (seenEmails.has(email)) throw new Error('Duplicate email in upload file');
                 seenEmails.add(email);
 

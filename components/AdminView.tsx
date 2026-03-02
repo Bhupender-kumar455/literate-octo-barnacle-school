@@ -1125,6 +1125,10 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
 
     // create teacher method 
     const handleCreateTeacher = async () => {
+        if (!newTeacher.password.trim()) {
+            toast.error("Password is required for new teachers");
+            return;
+        }
         try {
             const payload = {
                 ...newTeacher,
@@ -1943,7 +1947,7 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
                                 <Input
                                     label="Password"
                                     type="password"
-                                    placeholder="******"
+                                    placeholder="Min 12 chars with upper/lower/number/special"
                                     value={newTeacher.password}
                                     onChange={(e) => setNewTeacher({ ...newTeacher, password: e.target.value })}
                                 />
@@ -2036,7 +2040,7 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
                             <div className="mt-6">
                                 <div className="flex items-start gap-2 mb-6 text-sm text-slate-500 bg-blue-50 dark:bg-blue-900/10 p-3 rounded-lg text-blue-600 dark:text-blue-300">
                                     <div className="shrink-0 mt-0.5">Info</div>
-                                    <p>Use the provided format. Empty password cells default to <span className="font-semibold">Welcome123</span>. <a href="/teachers-template.xlsx" download className="underline font-semibold">Download Template</a></p>
+                                    <p>Use the provided format. Password is required for every row and must be strong (min 12 chars, upper/lower/number/special). <a href="/teachers-template.xlsx" download className="underline font-semibold">Download Template</a></p>
                                 </div>
                                 <div className="flex justify-end gap-3">
                                     <Button variant="outline" onClick={() => setShowBulkTeacherImportModal(false)}>Cancel</Button>

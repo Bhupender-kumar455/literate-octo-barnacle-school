@@ -124,7 +124,7 @@ export const updateStudent = async (id: number | string, payload: any) => {
   return res.data;
 };
 
-export const createStudentPortalUser = async (id: number | string, payload: { email: string; password?: string }) => {
+export const createStudentPortalUser = async (id: number | string, payload: { email: string; password: string }) => {
   const res = await api.post(`/admin/students/${id}/create-user`, payload);
   return res.data;
 };

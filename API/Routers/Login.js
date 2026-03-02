@@ -6,9 +6,8 @@ const { poolPromise } = require('../config/db');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { protect } = require('../middleware/auth');
+const { JWT_SECRET } = require('../config/env');
 require('dotenv').config();
-
-const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
 
 router.post('/login', async (req, res) => {
     const { email, password, role } = req.body;

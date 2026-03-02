@@ -2,10 +2,10 @@
 const express = require('express');
 const router = express.Router();
 const multer = require('multer');
-const xlsx = require('xlsx');
 const { poolPromise, sql } = require('../../config/db');
 const { protect, restrictTo } = require('../../middleware/auth');
 const { audit } = require('../../middleware/audit');
+const { parseSpreadsheetRows } = require('../../utils/spreadsheet');
 
 router.use(protect, restrictTo('admin'));
 
@@ -13,10 +13,17 @@ router.use(protect, restrictTo('admin'));
 const upload = multer({
     limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
     fileFilter: (req, file, cb) => {
-        if (file.mimetype.includes('spreadsheet') || file.mimetype.includes('excel')) {
+        const mimetype = String(file.mimetype || '').toLowerCase();
+        const originalname = String(file.originalname || '').toLowerCase();
+        if (
+            mimetype.includes('spreadsheet')
+            || mimetype.includes('excel')
+            || mimetype.includes('csv')
+            || /\.(xlsx|csv)$/.test(originalname)
+        ) {
             cb(null, true);
         } else {
-            cb(new Error('Only Excel files allowed!'));
+            cb(new Error('Only CSV/XLSX files allowed!'));
         }
     }
 });
@@ -28,9 +35,10 @@ router.post('/bulk', audit('bulk_upload_students', 'student'), upload.single('fi
     let transaction;
 
     try {
-        const workbook = xlsx.read(req.file.buffer, { type: 'buffer' });
-        const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const data = xlsx.utils.sheet_to_json(sheet);
+        const data = await parseSpreadsheetRows(req.file);
+        if (!data.length) {
+            return res.status(400).json({ message: "File has no data rows" });
+        }
 
         const pool = await poolPromise;
         transaction = new sql.Transaction(pool);
@@ -50,7 +58,7 @@ router.post('/bulk', audit('bulk_upload_students', 'student'), upload.single('fi
                 // === 1. Convert Excel serial date to YYYY-MM-DD ===
                 let dob = null;
                 if (row.dob || row.DOB || row['Date of Birth']) {
-                    const rawDob = row.dob || row.DOB || row['Date of Birth'];
+                    const rawDob = row.dob || row.d_o_b || row.date_of_birth;
                     if (typeof rawDob === 'number') {
                         const jsDate = new Date((rawDob - 25569) * 86400 * 1000);
                         dob = jsDate.toISOString().split('T')[0];
@@ -62,8 +70,8 @@ router.post('/bulk', audit('bulk_upload_students', 'student'), upload.single('fi
                     }
                 }
                 // === 2. Find class_id (super flexible) ===
-                const grade = String(row.grade || row.Grade || row.Class || row.class || '').trim();
-                const section = String(row.section || row.Section || row.Sec || '').trim().toUpperCase();
+                const grade = String(row.grade || row.class || '').trim();
+                const section = String(row.section || row.sec || '').trim().toUpperCase();
 
                 if (!grade || !section) {
                     throw new Error(`Missing grade/section (Grade: "${grade}", Section: "${section}")`);
@@ -92,7 +100,7 @@ router.post('/bulk', audit('bulk_upload_students', 'student'), upload.single('fi
                 }
 
                 // === 3. Generate admission_no if missing ===
-                const admission_no = row.admission_no || row.Admission_No || row['Admission No'] || `ADM${Date.now().toString().slice(-6)}${String(i + 1).padStart(3, '0')}`;
+                const admission_no = row.admission_no || `ADM${Date.now().toString().slice(-6)}${String(i + 1).padStart(3, '0')}`;
 
 
                 // === 4. INSERT STUDENT ===
@@ -100,13 +108,13 @@ router.post('/bulk', audit('bulk_upload_students', 'student'), upload.single('fi
                     .input('school_id', school_id)
                     .input('class_id', class_id)
                     .input('admission_no', String(admission_no))
-                    .input('roll_number', Number(row.roll_number || row.Roll_Number || (i + 1)))
-                    .input('name', String(row.name || row.Name || row.Student_Name || 'Unknown Student'))
-                    .input('gender', String(row.gender || row.Gender || 'Other').trim().toLowerCase())
+                    .input('roll_number', Number(row.roll_number || (i + 1)))
+                    .input('name', String(row.name || row.student_name || 'Unknown Student'))
+                    .input('gender', String(row.gender || 'Other').trim().toLowerCase())
                     .input('dob', dob)
-                    .input('guardian_name', String(row.guardian_name || row.Guardian_Name || row.father_name || 'Guardian'))
-                    .input('guardian_phone', String(row.guardian_phone || row.Phone || ''))
-                    .input('address', String(row.address || row.Address || ''))
+                    .input('guardian_name', String(row.guardian_name || row.father_name || 'Guardian'))
+                    .input('guardian_phone', String(row.guardian_phone || row.phone || ''))
+                    .input('address', String(row.address || ''))
                     .query(`
         INSERT INTO students 
         (school_id, class_id, admission_no, roll_number, name, gender, dob, guardian_name, guardian_phone, address)

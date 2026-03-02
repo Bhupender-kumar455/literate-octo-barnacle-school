@@ -18,6 +18,16 @@ export default defineConfig(({ mode }) => {
         alias: {
           '@': path.resolve(__dirname, '.'),
         }
-      }
+      },
+      build: {
+        rollupOptions: {
+          output: {
+            manualChunks: {
+              'charts-vendor': ['recharts'],
+              'ui-vendor': ['lucide-react', 'sonner'],
+            },
+          },
+        },
+      },
     };
 });

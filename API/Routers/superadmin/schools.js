@@ -7,8 +7,8 @@ const { upload, convertFileToBase64, formatUploadError } = require('../../utils/
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const { audit } = require('../../middleware/audit');
-
-const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
+const { JWT_SECRET } = require('../../config/env');
+const { validateStrongPassword } = require('../../utils/password');
 
 router.use(protect, restrictTo('superadmin'));
 
@@ -31,12 +31,16 @@ router.post('/logo', (req, res) => {
 router.post('/onboard', audit('onboard_school', 'school'), async (req, res) => {
     const { school_name, address, principal_name, principal_email, principal_password, principal_mobile, logo } = req.body;
 
-    if (!school_name || !principal_name || !principal_email) {
-        return res.status(400).json({ message: 'School name, principal name, and principal email are required' });
+    if (!school_name || !principal_name || !principal_email || !principal_password) {
+        return res.status(400).json({ message: 'School name, principal name, principal email, and principal password are required' });
     }
 
     const normalizedEmail = String(principal_email).trim().toLowerCase();
-    const tempPassword = principal_password || 'Welcome123';
+    const passwordValue = String(principal_password);
+    const passwordValidation = validateStrongPassword(passwordValue);
+    if (!passwordValidation.ok) {
+        return res.status(400).json({ message: passwordValidation.message });
+    }
     const logoBase64 = convertFileToBase64(logo);
 
     let transaction;
@@ -53,7 +57,7 @@ router.post('/onboard', audit('onboard_school', 'school'), async (req, res) => {
             return res.status(409).json({ message: 'Principal email is already in use' });
         }
 
-        const hashedPassword = await bcrypt.hash(tempPassword, 10);
+        const hashedPassword = await bcrypt.hash(passwordValue, 10);
 
         const schoolRes = await transaction.request()
             .input('name', sql.NVarChar(255), school_name)
@@ -87,7 +91,7 @@ router.post('/onboard', audit('onboard_school', 'school'), async (req, res) => {
 
         res.json({
             message: 'School onboarded successfully',
-            principal: { email: normalizedEmail, temporary_password: tempPassword }
+            principal: { email: normalizedEmail }
         });
 
     } catch (err) {

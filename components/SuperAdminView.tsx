@@ -623,9 +623,7 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
                     principal_name: formData.get("principal_name") as string,
                     principal_email: formData.get("principal_email") as string,
                     principal_mobile: formData.get("mobile_number") as string,
-                    principal_password:
-                      (formData.get("principal_password") as string) ||
-                      "Welcome123",
+                    principal_password: formData.get("principal_password") as string,
                     logo: logoUrl,
                   };
 
@@ -648,7 +646,7 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
                     if (res.ok) {
                       toast.success(`School "${data.school_name}" created!`);
                       toast.success(
-                        `Principal: ${data.principal_email} | Pass: ${data.principal_password}`
+                        `Principal account created: ${data.principal_email}`
                       );
                       fetchSchools(); // Refresh list
                       setShowCreateModal(false);
@@ -761,7 +759,9 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
                   <Input
                     name="principal_password"
                     label="Password"
-                    placeholder="Welcome123 (auto-generated if empty)"
+                    type="password"
+                    placeholder="Min 12 chars with upper/lower/number/special"
+                    required
                   />
                   <Input
                     name="mobile_number"

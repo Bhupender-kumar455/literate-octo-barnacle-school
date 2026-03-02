@@ -4,6 +4,7 @@ const { poolPromise, sql } = require('../../config/db');
 const { protect, restrictTo } = require('../../middleware/auth');
 const { audit } = require('../../middleware/audit');
 const { upload, convertFileToBase64, formatUploadError } = require('../../utils/fileHelper');
+const { validateStrongPassword } = require('../../utils/password');
 
 // RFC 4180 CSV cell escaping
 const csvEscape = (value) => {
@@ -361,10 +362,14 @@ router.post('/:id/create-user', audit('create_student_user', 'student'), async (
     if (!Number.isFinite(studentId)) {
         return res.status(400).json({ message: 'Invalid student id' });
     }
-    if (!email) return res.status(400).json({ message: 'Email is required' });
+    if (!email || !password) return res.status(400).json({ message: 'Email and password are required' });
 
     const normalizedEmail = String(email).trim().toLowerCase();
-    const passwordValue = password || 'Welcome123';
+    const passwordValue = String(password);
+    const passwordValidation = validateStrongPassword(passwordValue);
+    if (!passwordValidation.ok) {
+        return res.status(400).json({ message: passwordValidation.message });
+    }
 
     let transaction;
     try {
@@ -415,7 +420,7 @@ router.post('/:id/create-user', audit('create_student_user', 'student'), async (
             `);
 
         await transaction.commit();
-        res.status(201).json({ message: 'Student portal user created', user_id: userId, temporary_password: passwordValue });
+        res.status(201).json({ message: 'Student portal user created', user_id: userId });
     } catch (err) {
         if (transaction) await transaction.rollback();
         res.status(500).json({ message: err.message });
