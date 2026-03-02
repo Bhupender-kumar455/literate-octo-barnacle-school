@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { Toaster, toast } from "sonner";
 import { User, UserRole } from "./types";
-import { mockUsers } from "./services/mockData";
 import Login from "./components/Login";
 import Layout from "./components/Layout";
 import SuperAdminView from "./components/SuperAdminView";
 import AdminView from "./components/AdminView";
 import TeacherView from "./components/TeacherView";
-import { login } from "./services/api";
+import StudentView from "./components/StudentView";
+import { login, getCurrentUser } from "./services/api";
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -15,7 +15,7 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [isDark, setIsDark] = useState(false);
 
-  // Simulate Auth Check
+  // Auth Check
   useEffect(() => {
     const savedTheme = localStorage.getItem('schoolSystemaTheme');
     const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -29,13 +29,29 @@ const App: React.FC = () => {
     }
     const token = localStorage.getItem("token");
     if (token) {
-
-      setLoading(false);
+      (async () => {
+        try {
+          const res = await getCurrentUser();
+          if (res?.user) {
+            setUser({
+              id: String(res.user.id),
+              name: res.user.name,
+              email: res.user.email,
+              role: res.user.role as UserRole,
+              avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${res.user.name}`,
+              school_id: res.user.school_id,
+            });
+          }
+        } catch (err) {
+          localStorage.removeItem("token");
+        } finally {
+          setLoading(false);
+        }
+      })();
     } else {
       setLoading(false);
     }
   }, []);
-  // App.tsx → Replace the entire handleLogin function with this
 
   const toggleTheme = () => {
     if (isDark) {
@@ -70,12 +86,13 @@ const App: React.FC = () => {
         avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${response.user.name}`,
         school_id: response.user.school_id,
       });
+      localStorage.setItem("user", JSON.stringify(response.user));
 
       setCurrentView("dashboard");
-      toast.success(`Welcome back, ${response.user.name}! 👑`);
+      toast.success(`Welcome back, ${response.user.name}!`);
     } catch (err: any) {
       toast.error(
-        err.response?.data?.message || "Login failed baby, try again!"
+        err.response?.data?.message || "Login failed. Please try again."
       );
     } finally {
       setLoading(false);
@@ -84,6 +101,8 @@ const App: React.FC = () => {
 
   const handleLogout = () => {
     setUser(null);
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
     toast.message("Logged out successfully");
   };
 
@@ -125,7 +144,10 @@ const App: React.FC = () => {
           <AdminView currentView={currentView} user={user} />
         )}
         {user.role === UserRole.TEACHER && (
-          <TeacherView currentView={currentView} />
+          <TeacherView currentView={currentView} user={user} />
+        )}
+        {user.role === UserRole.STUDENT && (
+          <StudentView currentView={currentView} user={user} />
         )}
       </Layout>
     </>

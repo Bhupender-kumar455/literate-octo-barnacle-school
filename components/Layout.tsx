@@ -18,7 +18,8 @@ import {
   BarChart3,
   Megaphone,
   Sun,
-  Moon
+  Moon,
+  Calendar
 } from 'lucide-react';
 import { Button, Badge } from './UIComponents';
 
@@ -35,12 +36,22 @@ interface LayoutProps {
 const Layout: React.FC<LayoutProps> = ({ user, children, onLogout, currentView, onChangeView, isDark, toggleTheme }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
+  const getRoleBadge = () => {
+    if (user.role === UserRole.SUPER_ADMIN) return { code: 'SA', label: 'System Admin' };
+    if (user.role === UserRole.ADMIN) return { code: 'AD', label: 'School Admin' };
+    if (user.role === UserRole.STUDENT) return { code: 'ST', label: 'Student' };
+    return { code: 'TR', label: 'Teacher' };
+  };
+
+  const roleBadge = getRoleBadge();
+
   // --- Define Navigation based on Role ---
   const getNavItems = () => {
     if (user.role === UserRole.SUPER_ADMIN) {
       return [
         { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
         { id: 'schools', label: 'All Schools', icon: School },
+        { id: 'users', label: 'Users', icon: Users },
         { id: 'settings', label: 'Global Settings', icon: Settings },
       ];
     } else if (user.role === UserRole.ADMIN) {
@@ -51,7 +62,20 @@ const Layout: React.FC<LayoutProps> = ({ user, children, onLogout, currentView, 
         { id: 'classes', label: 'Classes', icon: BookOpen },
         { id: 'attendance', label: 'Attendance', icon: ClipboardCheck },
         { id: 'fees', label: 'Fees & Invoices', icon: CreditCard },
+        { id: 'leaves', label: 'Leave Approvals', icon: Calendar },
         { id: 'reports', label: 'Reports', icon: BarChart3 },
+        { id: 'notifications', label: 'Notifications', icon: Bell },
+        { id: 'announcements', label: 'Announcements', icon: Megaphone },
+      ];
+    } else if (user.role === UserRole.STUDENT) {
+      return [
+        { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+        { id: 'attendance', label: 'Attendance', icon: ClipboardCheck },
+        { id: 'fees', label: 'Fees', icon: CreditCard },
+        { id: 'assignments', label: 'Assignments', icon: BookOpen },
+        { id: 'grades', label: 'Grades', icon: GraduationCap },
+        { id: 'leaves', label: 'Leaves', icon: Calendar },
+        { id: 'notifications', label: 'Notifications', icon: Bell },
         { id: 'announcements', label: 'Announcements', icon: Megaphone },
       ];
     } else {
@@ -60,6 +84,9 @@ const Layout: React.FC<LayoutProps> = ({ user, children, onLogout, currentView, 
         { id: 'dashboard', label: 'My Schedule', icon: CalendarDays },
         { id: 'attendance', label: 'Take Attendance', icon: ClipboardCheck },
         { id: 'students', label: 'My Students', icon: Users },
+        { id: 'assignments', label: 'Assignments', icon: BookOpen },
+        { id: 'grades', label: 'Grades', icon: GraduationCap },
+        { id: 'leaves', label: 'Leaves', icon: Calendar },
         { id: 'history', label: 'History', icon: BarChart3 },
       ];
     }
@@ -180,9 +207,11 @@ const Layout: React.FC<LayoutProps> = ({ user, children, onLogout, currentView, 
             {/* School Logo context */}
             <div className="flex items-center gap-3">
               <div className="w-8 h-8 rounded-full bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center text-indigo-600 dark:text-indigo-400 font-bold text-xs">
-                {user.role === UserRole.SUPER_ADMIN ? 'SA' : 'H'}
+                {roleBadge.code}
               </div>
-              <span className="hidden sm:block text-sm font-medium">{user.role === UserRole.SUPER_ADMIN ? 'System Admin' : 'Hogwarts Academy'}</span>
+              <span className="hidden sm:block text-sm font-medium">
+                {roleBadge.label}
+              </span>
             </div>
           </div>
         </header>

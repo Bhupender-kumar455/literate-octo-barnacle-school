@@ -1,7 +1,8 @@
 export enum UserRole {
   SUPER_ADMIN = "superadmin",
-  ADMIN = "admin", // Principal
+  ADMIN = "admin",
   TEACHER = "teacher",
+  STUDENT = "student",
 }
 
 export interface User {
@@ -11,44 +12,63 @@ export interface User {
   role: UserRole;
   avatar?: string;
   phone?: string;
-  school_id?: string;
+  school_id?: number | string | null;
 }
 
 export interface Teacher extends User {
-  id: string;
-  department: string;
+  department?: string;
   logo?: string;
   address?: string;
   joinDate?: string;
   is_active?: boolean;
+  employee_id?: string;
+}
+
+export interface Student {
+  id: string;
+  school_id: string;
+  class_id: string;
+  admission_no: string;
+  roll_number: number | string;
+  name: string;
+  logo?: string;
+  gender?: "male" | "female" | "other" | string;
+  dob?: string;
+  guardian_name?: string;
+  guardian_phone?: string;
+  fees_status?: "Paid" | "Pending" | "Overdue" | string;
+  class_name?: string;
 }
 
 export interface School {
-  id: string;
-  name: string;
-  school_name?: string; // API response alias
-  address: string;
-  phone: string;
-  logo: string;
-  created_by: string; // user.id
-  studentCount: number;
-  student_count?: number; // API response alias
-  principalName: string;
-  principal_name?: string; // API response alias
+  id?: string;
+  school_id?: string;
+  name?: string;
+  school_name?: string;
+  address?: string;
+  phone?: string;
+  logo?: string;
+  created_by?: string;
+  studentCount?: number;
+  student_count?: number;
+  principalName?: string;
+  principal_name?: string;
   principal_email?: string;
-  status?: number; // 1: Active, 2: Inactive, 3: Suspended
+  status?: number;
   plan_type?: string;
   subscription_end?: string;
   storage_limit_gb?: number;
+  user_id?: number | string;
 }
 
 export interface ClassGroup {
   id: string;
   school_id: string;
   grade: string;
-  section: string; // "A", "B"
+  section: string;
   academic_year: string;
   class_teacher_id?: string;
+  teacher_name?: string;
 }
 
 export interface Subject {
@@ -65,26 +85,12 @@ export interface ClassSubject {
   teacher_id: string;
 }
 
-export interface Student {
-  id: string;
-  school_id: string;
-  class_id: string;
-  admission_no: string;
-  roll_number: string;
-  name: string;
-  gender: "Male" | "Female" | "Other";
-  dob: string;
-  guardian_name: string;
-  guardian_phone: string;
-  fees_status: "Paid" | "Pending" | "Overdue";
-}
-
 export interface AttendanceRecord {
   id: string;
   student_id: string;
   date: string;
-  status: "Present" | "Absent" | "Late";
-  marked_by: string; // teacher.id
+  status: "present" | "absent" | "late" | "half_day" | string;
+  marked_by: string;
   remarks?: string;
 }
 
@@ -96,7 +102,68 @@ export interface Announcement {
   type: "info" | "alert" | "success";
 }
 
-// For the UI flow
+export interface NotificationTemplate {
+  id: string;
+  school_id?: string;
+  name: string;
+  channel: "in_app" | "email" | "sms" | "whatsapp" | string;
+  title_template?: string;
+  message_template: string;
+  is_active?: boolean;
+  created_at?: string;
+}
+
+export interface NotificationItem {
+  id: string;
+  recipient_type: "school" | "student" | "teacher" | "admin" | string;
+  recipient_id?: string | number | null;
+  channel: "in_app" | "email" | "sms" | "whatsapp" | string;
+  title?: string;
+  message: string;
+  status: "queued" | "sent" | "failed" | "cancelled" | "read" | string;
+  scheduled_at?: string | null;
+  sent_at?: string | null;
+  read_at?: string | null;
+  attempts?: number;
+  last_attempt_at?: string | null;
+  next_retry_at?: string | null;
+  provider_message_id?: string | null;
+  created_at?: string;
+}
+
+export interface ReportCardSubject {
+  subject: string;
+  term: string;
+  score: number;
+  max_score: number;
+  percentage: number;
+  band: string;
+}
+
+export interface ReportCardSummary {
+  total_subjects: number;
+  total_score: number;
+  total_max_score: number;
+  percentage: number;
+  grade: string;
+  pass: boolean;
+}
+
+export interface StudentReportCard {
+  student: {
+    id: string | number;
+    name: string;
+    admission_no: string;
+    roll_number: string | number;
+    guardian_name?: string;
+    guardian_phone?: string;
+    class_name: string;
+  };
+  term?: string | null;
+  subjects: ReportCardSubject[];
+  summary: ReportCardSummary;
+}
+
 export interface NavItem {
   label: string;
   icon: any;

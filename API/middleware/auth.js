@@ -1,5 +1,7 @@
 const jwt = require('jsonwebtoken');
 
+const JWT_SECRET = process.env.JWT_SECRET || 'dev_secret_change_me';
+
 const protect = async (req, res, next) => {
     let token;
     if (req.headers.authorization?.startsWith('Bearer')) {
@@ -9,7 +11,7 @@ const protect = async (req, res, next) => {
     if (!token) return res.status(401).json({ message: "No token, access denied" });
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const decoded = jwt.verify(token, JWT_SECRET);
         req.user = decoded; // contains id, role, school_id
         next();
     } catch (err) {

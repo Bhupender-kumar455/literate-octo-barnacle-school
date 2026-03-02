@@ -119,7 +119,7 @@ export const StatCard = ({ title, value, subtext, icon: Icon, trend }: { title: 
       <div className="mt-4 flex items-center text-sm">
         {trend && (
           <span className={cn("font-medium mr-2", trend === 'up' ? "text-emerald-600" : "text-red-600")}>
-            {trend === 'up' ? "↑" : "↓"} 12%
+            {trend === 'up' ? "Up" : "Down"} 12%
           </span>
         )}
         <span className="text-slate-400">{subtext}</span>

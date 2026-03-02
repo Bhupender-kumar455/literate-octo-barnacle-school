@@ -85,11 +85,11 @@ export const mockSubjects: Subject[] = [
 ];
 
 export const mockStudents: Student[] = [
-  { id: 'st1', school_id: 's1', class_id: 'c1', admission_no: 'A001', roll_number: '1', name: 'Harry Potter', gender: 'Male', dob: '1980-07-31', guardian_name: 'Vernon Dursley', guardian_phone: '555-0001', fees_status: 'Paid' },
-  { id: 'st2', school_id: 's1', class_id: 'c1', admission_no: 'A002', roll_number: '2', name: 'Hermione Granger', gender: 'Female', dob: '1979-09-19', guardian_name: 'Mr. Granger', guardian_phone: '555-0002', fees_status: 'Paid' },
-  { id: 'st3', school_id: 's1', class_id: 'c1', admission_no: 'A003', roll_number: '3', name: 'Ron Weasley', gender: 'Male', dob: '1980-03-01', guardian_name: 'Molly Weasley', guardian_phone: '555-0003', fees_status: 'Pending' },
-  { id: 'st4', school_id: 's1', class_id: 'c1', admission_no: 'A004', roll_number: '4', name: 'Draco Malfoy', gender: 'Male', dob: '1980-06-05', guardian_name: 'Lucius Malfoy', guardian_phone: '555-0004', fees_status: 'Paid' },
-  { id: 'st5', school_id: 's1', class_id: 'c1', admission_no: 'A005', roll_number: '5', name: 'Neville Longbottom', gender: 'Male', dob: '1980-07-30', guardian_name: 'Augusta', guardian_phone: '555-0005', fees_status: 'Overdue' },
+  { id: 'st1', school_id: 's1', class_id: 'c1', admission_no: 'A001', roll_number: '1', name: 'Harry Potter', gender: 'male', dob: '1980-07-31', guardian_name: 'Vernon Dursley', guardian_phone: '555-0001', fees_status: 'Paid' },
+  { id: 'st2', school_id: 's1', class_id: 'c1', admission_no: 'A002', roll_number: '2', name: 'Hermione Granger', gender: 'female', dob: '1979-09-19', guardian_name: 'Mr. Granger', guardian_phone: '555-0002', fees_status: 'Paid' },
+  { id: 'st3', school_id: 's1', class_id: 'c1', admission_no: 'A003', roll_number: '3', name: 'Ron Weasley', gender: 'male', dob: '1980-03-01', guardian_name: 'Molly Weasley', guardian_phone: '555-0003', fees_status: 'Pending' },
+  { id: 'st4', school_id: 's1', class_id: 'c1', admission_no: 'A004', roll_number: '4', name: 'Draco Malfoy', gender: 'male', dob: '1980-06-05', guardian_name: 'Lucius Malfoy', guardian_phone: '555-0004', fees_status: 'Paid' },
+  { id: 'st5', school_id: 's1', class_id: 'c1', admission_no: 'A005', roll_number: '5', name: 'Neville Longbottom', gender: 'male', dob: '1980-07-30', guardian_name: 'Augusta', guardian_phone: '555-0005', fees_status: 'Overdue' },
 ];
 
 export const mockAnnouncements: Announcement[] = [

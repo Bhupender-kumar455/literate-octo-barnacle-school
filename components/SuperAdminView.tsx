@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { mockSchools, getSuperAdminStats } from "../services/mockData";
+import { API_BASE_URL, getSchools, getSuperAdminStats, createStripeCustomer, createStripeSubscription, createBillingPortal, getAuditLogs, impersonateSchool, getSuperAdminUsers, updateSuperAdminUser } from "../services/api";
 import { Card, Button, StatCard, Badge, Input } from "./UIComponents";
 import { School } from '../types';
 import {
@@ -35,7 +35,6 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { toast } from "sonner";
-const API_BASE_URL = process.env.API_URL || "http://localhost:5000";
 
 // --- Mock Data for Dashboard ---
 const growthData = [
@@ -47,54 +46,48 @@ const growthData = [
   { name: "Jun", schools: 6, revenue: 28000 },
 ];
 
-const recentActivities = [
-  {
-    id: 1,
-    action: "New School Onboarded",
-    target: "Springfield Elementary",
-    time: "2 hours ago",
-    icon: Building2,
-    color: "text-emerald-500",
-  },
-  {
-    id: 2,
-    action: "System Update",
-    target: "v2.4.0 Deployed",
-    time: "5 hours ago",
-    icon: Server,
-    color: "text-blue-500",
-  },
-  {
-    id: 3,
-    action: "High Traffic Alert",
-    target: "Server Load > 80%",
-    time: "1 day ago",
-    icon: Activity,
-    color: "text-amber-500",
-  },
-  {
-    id: 4,
-    action: "New Subscription",
-    target: "Xavier Institute (Enterprise)",
-    time: "2 days ago",
-    icon: CreditCard,
-    color: "text-purple-500",
-  },
-];
+const activityIcons = {
+  onboard_school: Building2,
+  update_school: Server,
+  impersonate_school: UserCog,
+  create_subscription: CreditCard,
+  create_customer: CreditCard,
+  report_download: Activity,
+};
+
+const parseApiResponse = async (res: Response): Promise<any> => {
+  const raw = await res.text();
+  if (!raw) return {};
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return { message: raw };
+  }
+};
 
 const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
-  const stats = getSuperAdminStats();
   const [searchTerm, setSearchTerm] = useState("");
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [logoUrl, setLogoUrl] = useState("");
-  const [schools, setSchools] = useState([]);
+  const [schools, setSchools] = useState<any[]>([]);
   const [statusFilter, setStatusFilter] = useState("All");
+  const [stats, setStats] = useState({
+    totalSchools: 0,
+    totalStudents: 0,
+    totalRevenue: 0,
+    activeToday: 0,
+  });
 
   // Modal States
   const [managingSchool, setManagingSchool] = useState<School | null>(null);
   const [impersonatingSchool, setImpersonatingSchool] = useState<School | null>(null);
   const [manageTab, setManageTab] = useState<'details' | 'subscription' | 'danger'>('details');
+  const [stripePriceId, setStripePriceId] = useState("");
+  const [activities, setActivities] = useState<any[]>([]);
+  const [users, setUsers] = useState<any[]>([]);
 
+  const isSchoolActive = (status: any) =>
+    status === 1 || status === true || status === "1" || String(status).toLowerCase() === "true";
 
   const filteredSchools = schools.filter((school) => {
     const matchesSearch =
@@ -103,9 +96,8 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
 
     const matchesStatus =
       statusFilter === "All" ||
-      (statusFilter === "Active" && school.status === 1) ||
-      (statusFilter === "Inactive" && school.status === 2) ||
-      (statusFilter === "Suspended" && school.status !== 1 && school.status !== 2);
+      (statusFilter === "Active" && isSchoolActive(school.status)) ||
+      (statusFilter === "Inactive" && !isSchoolActive(school.status));
 
     return matchesSearch && matchesStatus;
   });
@@ -115,16 +107,26 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
     "general" | "security" | "billing"
   >("general");
   const [maintenanceMode, setMaintenanceMode] = useState(false);
+  const SETTINGS_STORAGE_KEY = "schoolsystema_superadmin_settings_v1";
+  const [settingsForm, setSettingsForm] = useState({
+    platformName: "SchoolSystema SaaS",
+    supportEmail: "support@schoolsystema.com",
+    defaultLanguage: "English (US)",
+    timezone: "UTC",
+    enforce2FA: true,
+    minPasswordLength: 8,
+    sessionTimeoutMins: 30,
+    allowedIpRanges: "",
+    defaultCurrency: "USD ($)",
+    trialPeriodDays: 14,
+    gracePeriodDays: 7,
+    standardPlanPrice: 499,
+  });
 
   const fetchSchools = async () => {
     try {
-      const res = await fetch(`${API_BASE_URL}/api/superadmin/schools/all`, {
-        headers: {
-          Authorization: `Bearer ${localStorage.getItem("token")}`,
-        },
-      });
-      const data = await res.json();
-      setSchools(data);
+      const data = await getSchools();
+      setSchools(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error("Failed to fetch schools:", error);
     }
@@ -132,10 +134,70 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
 
   useEffect(() => {
     fetchSchools();
+    fetchStats();
+    fetchActivities();
     return () => { };
   }, []);
 
+  useEffect(() => {
+    if (currentView === "users") {
+      fetchUsers();
+    }
+  }, [currentView]);
+
+  useEffect(() => {
+    try {
+      const rawSettings = localStorage.getItem(SETTINGS_STORAGE_KEY);
+      if (!rawSettings) return;
+      const parsed = JSON.parse(rawSettings);
+      setSettingsForm((prev) => ({ ...prev, ...parsed }));
+      if (typeof parsed.maintenanceMode === "boolean") {
+        setMaintenanceMode(parsed.maintenanceMode);
+      }
+    } catch (error) {
+      console.error("Failed to load saved settings:", error);
+    }
+  }, []);
+
+  const fetchActivities = async () => {
+    try {
+      const data = await getAuditLogs(20);
+      setActivities(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error("Failed to fetch audit logs:", error);
+    }
+  };
+
+  const fetchUsers = async () => {
+    try {
+      const data = await getSuperAdminUsers();
+      setUsers(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error("Failed to fetch users:", error);
+    }
+  };
+
+  const fetchStats = async () => {
+    try {
+      const data = await getSuperAdminStats();
+      setStats({
+        totalSchools: data?.totalSchools || 0,
+        totalStudents: data?.totalStudents || 0,
+        totalRevenue: data?.totalRevenue || 0,
+        activeToday: data?.activeToday || 0,
+      });
+    } catch (error) {
+      console.error("Failed to fetch stats:", error);
+    }
+  };
+
   const handleSaveSettings = () => {
+    const payload = {
+      ...settingsForm,
+      maintenanceMode,
+      savedAt: new Date().toISOString(),
+    };
+    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(payload));
     toast.success("System configuration updated successfully");
   };
 
@@ -158,7 +220,7 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
           principal_email: managingSchool.principal_email,
           status: managingSchool.status,
           school_id: managingSchool.school_id,
-          user__id: managingSchool.user__id,
+          user_id: managingSchool.user_id,
           plan_type: managingSchool.plan_type,
           storage_limit_gb: managingSchool.storage_limit_gb,
         }),
@@ -179,13 +241,27 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
     }
   };
 
-  const handleImpersonateLogin = () => {
-    toast.loading("Switching identity...");
-    setTimeout(() => {
+  const handleImpersonateLogin = async () => {
+    if (!impersonatingSchool?.school_id) return;
+    try {
+      toast.loading("Switching identity...");
+      const res = await impersonateSchool(impersonatingSchool.school_id);
+      if (res?.token && res?.user) {
+        localStorage.setItem("token", res.token);
+        localStorage.setItem("user", JSON.stringify(res.user));
+        toast.dismiss();
+        toast.success(`Now logged in as ${res.user.name}`);
+        window.location.reload();
+      } else {
+        toast.dismiss();
+        toast.error("Impersonation failed");
+      }
+    } catch (err) {
       toast.dismiss();
-      toast.success(`Now logged in as ${impersonatingSchool?.principalName}`);
+      toast.error("Impersonation failed");
+    } finally {
       setImpersonatingSchool(null);
-    }, 1500);
+    }
   };
 
   // --- VIEW: DASHBOARD ---
@@ -223,7 +299,7 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
           />
           <StatCard
             title="Monthly Revenue"
-            value={stats.totalRevenue}
+            value={`$${stats.totalRevenue}`}
             icon={TrendingUp}
             trend="up"
           />
@@ -339,24 +415,27 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
             <Card>
               <h3 className="font-bold mb-4">Recent Activity</h3>
               <div className="space-y-4">
-                {recentActivities.map((activity) => (
-                  <div key={activity.id} className="flex items-start gap-3">
-                    <div className={`mt-1 ${activity.color}`}>
-                      <activity.icon size={16} />
+                {activities.map((activity, idx) => {
+                  const Icon = activityIcons[activity.action] || Activity;
+                  return (
+                    <div key={`${activity.id}-${idx}`} className="flex items-start gap-3">
+                      <div className="mt-1 text-indigo-500">
+                        <Icon size={16} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-slate-900 dark:text-white">
+                          {activity.action}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {activity.entity || ''} {activity.entity_id || ''}
+                        </p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">
+                          {activity.created_at}
+                        </p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-slate-900 dark:text-white">
-                        {activity.action}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {activity.target}
-                      </p>
-                      <p className="text-[10px] text-slate-400 mt-0.5">
-                        {activity.time}
-                      </p>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               <Button
                 variant="ghost"
@@ -413,7 +492,6 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
             >
               <option value="All">Status: All</option>
               <option value="Active">Active</option>
-              <option value="Suspended">Suspended</option>
               <option value="Inactive">Inactive</option>
             </select>
             <select className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm outline-none">
@@ -451,18 +529,12 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
                 </div>
                 <Badge
                   variant={
-                    school.status === 1
+                    isSchoolActive(school.status)
                       ? "success"
-                      : school.status === 2
-                        ? "warning"
-                        : "destructive"
+                      : "warning"
                   }
                 >
-                  {school.status === 1
-                    ? "Active"
-                    : school.status === 2
-                      ? "Inactive"
-                      : "Suspended"}
+                  {isSchoolActive(school.status) ? "Active" : "Inactive"}
                 </Badge>
               </div>
 
@@ -520,7 +592,7 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
         </div>
 
         {/* Create Modal */}
-        {/* REAL Onboard Modal — CONNECTED TO BACKEND */}
+        {/* Onboard Modal - Connected to Backend */}
         {showCreateModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
             <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-2xl p-8 shadow-2xl border border-slate-200 dark:border-slate-800 relative">
@@ -584,7 +656,7 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
                       toast.error(result.message || "Failed to create school");
                     }
                   } catch (err) {
-                    toast.error("Network error — is backend running?");
+                    toast.error("Network error - is backend running?");
                   }
                 }}
                 className="space-y-6"
@@ -617,12 +689,12 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
                               body: formData,
                             }
                           );
-                          const data = await res.json();
+                          const data = await parseApiResponse(res);
                           if (res.ok) {
                             setLogoUrl(data.url);
                             toast.success("Logo uploaded successfully");
                           } else {
-                            toast.error("Logo upload failed");
+                            toast.error(data.message || "Logo upload failed");
                           }
                         } catch (err) {
                           toast.error("Error uploading logo");
@@ -792,12 +864,12 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
                                     body: formData,
                                   }
                                 );
-                                const data = await res.json();
+                                const data = await parseApiResponse(res);
                                 if (res.ok) {
                                   setManagingSchool({ ...managingSchool, logo: data.url });
                                   toast.success("Logo uploaded successfully");
                                 } else {
-                                  toast.error("Logo upload failed");
+                                  toast.error(data.message || "Logo upload failed");
                                 }
                               } catch (err) {
                                 toast.error("Error uploading logo");
@@ -872,18 +944,12 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
                         </div>
                         <Badge
                           variant={
-                            managingSchool.status === 1
+                            isSchoolActive(managingSchool.status)
                               ? "success"
-                              : managingSchool.status === 2
-                                ? "warning"
-                                : "destructive"
+                              : "warning"
                           }
                         >
-                          {managingSchool.status === 1
-                            ? "Active"
-                            : managingSchool.status === 2
-                              ? "Inactive"
-                              : "Suspended"}
+                          {isSchoolActive(managingSchool.status) ? "Active" : "Inactive"}
                         </Badge>
                       </div>
 
@@ -891,15 +957,14 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
                         <div>
                           <label className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5 block">Account Status</label>
                           <select
-                            value={managingSchool.status === 1 ? "Active" : managingSchool.status === 2 ? "Inactive" : "Suspended"}
+                            value={isSchoolActive(managingSchool.status) ? "Active" : "Inactive"}
                             onChange={(e) => {
-                              const statusMap: { [key: string]: number } = { "Active": 1, "Inactive": 2, "Suspended": 3 };
+                              const statusMap: { [key: string]: number } = { "Active": 1, "Inactive": 0 };
                               setManagingSchool({ ...managingSchool, status: statusMap[e.target.value] });
                             }}
                             className="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-800"
                           >
                             <option value="Active">Active</option>
-                            <option value="Suspended">Suspended</option>
                             <option value="Inactive">Inactive</option>
                           </select>
                         </div>
@@ -928,6 +993,62 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
                           value={String(managingSchool.storage_limit_gb)}
                           onChange={(e) => setManagingSchool({ ...managingSchool, storage_limit_gb: Number(e.target.value) })}
                         />
+                      </div>
+
+                      <div className="mt-6 p-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/50 dark:bg-slate-800/50">
+                        <h5 className="font-semibold mb-3">Billing (Stripe)</h5>
+                        <Input
+                          label="Stripe Price ID"
+                          placeholder="price_..."
+                          value={stripePriceId}
+                          onChange={(e) => setStripePriceId(e.target.value)}
+                        />
+                        <div className="flex gap-3 mt-4">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={async () => {
+                              if (!managingSchool?.school_id) return;
+                              await createStripeCustomer({
+                                school_id: managingSchool.school_id,
+                                email: managingSchool.principal_email,
+                                name: managingSchool.school_name,
+                              });
+                              toast.success("Stripe customer created");
+                            }}
+                          >
+                            Create Customer
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={async () => {
+                              if (!managingSchool?.school_id || !stripePriceId) return;
+                              const res = await createStripeSubscription({
+                                school_id: managingSchool.school_id,
+                                price_id: stripePriceId,
+                              });
+                              if (res?.clientSecret) {
+                                toast.success("Subscription created. Complete payment in Stripe.");
+                              }
+                            }}
+                          >
+                            Start Subscription
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            onClick={async () => {
+                              if (!managingSchool?.school_id) return;
+                              const res = await createBillingPortal({
+                                school_id: managingSchool.school_id,
+                                return_url: window.location.origin,
+                              });
+                              if (res?.url) window.open(res.url, "_blank");
+                            }}
+                          >
+                            Open Billing Portal
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -972,7 +1093,7 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
               </div>
               <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Impersonate Principal?</h3>
               <p className="text-slate-500 mb-6">
-                You are about to sign in as <span className="font-semibold text-slate-900 dark:text-white">{impersonatingSchool.principalName}</span> at <span className="font-semibold text-slate-900 dark:text-white">{impersonatingSchool.name}</span>.
+                You are about to sign in as <span className="font-semibold text-slate-900 dark:text-white">{impersonatingSchool.principal_name || (impersonatingSchool as any).principalName || ''}</span> at <span className="font-semibold text-slate-900 dark:text-white">{impersonatingSchool.school_name || impersonatingSchool.name}</span>.
                 <br /><br />
                 This action will be logged in the system audit trail. You will have full administrative access to their school.
               </p>
@@ -985,6 +1106,76 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
             </div>
           </div>
         )}
+      </div>
+    );
+  }
+
+  // --- VIEW: USERS ---
+  if (currentView === "users") {
+    return (
+      <div className="space-y-6 animate-in fade-in duration-500">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900 dark:text-white">User Management</h2>
+          <p className="text-slate-500">Manage system users, roles, and access.</p>
+        </div>
+        <Card>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left text-slate-500 border-b border-slate-100 dark:border-slate-800">
+                <tr>
+                  <th className="pb-3 font-medium">Name</th>
+                  <th className="pb-3 font-medium">Email</th>
+                  <th className="pb-3 font-medium">Role</th>
+                  <th className="pb-3 font-medium">Active</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {users.map((u) => (
+                  <tr key={u.id}>
+                    <td className="py-3">{u.name}</td>
+                    <td className="py-3">{u.email}</td>
+                    <td className="py-3">
+                      <select
+                        className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
+                        value={u.role}
+                        onChange={async (e) => {
+                          const next = e.target.value;
+                          try {
+                            await updateSuperAdminUser(u.id, { role: next });
+                            fetchUsers();
+                            toast.success("User updated");
+                          } catch (err) {
+                            toast.error("Failed to update user");
+                          }
+                        }}
+                      >
+                        <option value="superadmin">superadmin</option>
+                        <option value="admin">admin</option>
+                        <option value="teacher">teacher</option>
+                        <option value="student">student</option>
+                      </select>
+                    </td>
+                    <td className="py-3">
+                      <input
+                        type="checkbox"
+                        checked={!!u.is_active}
+                        onChange={async (e) => {
+                          try {
+                            await updateSuperAdminUser(u.id, { is_active: e.target.checked });
+                            fetchUsers();
+                            toast.success("User updated");
+                          } catch (err) {
+                            toast.error("Failed to update user");
+                          }
+                        }}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
       </div>
     );
   }
@@ -1050,19 +1241,26 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
                     <div className="space-y-4">
                       <Input
                         label="Platform Name"
-                        defaultValue="SchoolSystema SaaS"
+                        value={settingsForm.platformName}
+                        onChange={(e) => setSettingsForm({ ...settingsForm, platformName: e.target.value })}
                       />
                       <Input
                         label="Support Email"
-                        defaultValue="support@schoolsystema.com"
+                        value={settingsForm.supportEmail}
+                        onChange={(e) => setSettingsForm({ ...settingsForm, supportEmail: e.target.value })}
                         type="email"
                       />
                       <div className="grid grid-cols-2 gap-4">
                         <Input
                           label="Default Language"
-                          defaultValue="English (US)"
+                          value={settingsForm.defaultLanguage}
+                          onChange={(e) => setSettingsForm({ ...settingsForm, defaultLanguage: e.target.value })}
                         />
-                        <Input label="Timezone" defaultValue="UTC" />
+                        <Input
+                          label="Timezone"
+                          value={settingsForm.timezone}
+                          onChange={(e) => setSettingsForm({ ...settingsForm, timezone: e.target.value })}
+                        />
                       </div>
                     </div>
                   </div>
@@ -1113,7 +1311,8 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
                       <input
                         type="checkbox"
                         className="toggle"
-                        defaultChecked
+                        checked={settingsForm.enforce2FA}
+                        onChange={(e) => setSettingsForm({ ...settingsForm, enforce2FA: e.target.checked })}
                       />
                     </div>
                     <div className="h-px bg-slate-100 dark:bg-slate-800"></div>
@@ -1121,12 +1320,24 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
                       <Input
                         label="Min Password Length"
                         type="number"
-                        defaultValue="8"
+                        value={settingsForm.minPasswordLength}
+                        onChange={(e) =>
+                          setSettingsForm({
+                            ...settingsForm,
+                            minPasswordLength: Number(e.target.value || 0),
+                          })
+                        }
                       />
                       <Input
                         label="Session Timeout (mins)"
                         type="number"
-                        defaultValue="30"
+                        value={settingsForm.sessionTimeoutMins}
+                        onChange={(e) =>
+                          setSettingsForm({
+                            ...settingsForm,
+                            sessionTimeoutMins: Number(e.target.value || 0),
+                          })
+                        }
                       />
                     </div>
                     <div className="h-px bg-slate-100 dark:bg-slate-800"></div>
@@ -1137,6 +1348,8 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
                       <textarea
                         className="w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 p-3 text-sm h-24"
                         placeholder="0.0.0.0/0"
+                        value={settingsForm.allowedIpRanges}
+                        onChange={(e) => setSettingsForm({ ...settingsForm, allowedIpRanges: e.target.value })}
                       ></textarea>
                       <p className="text-xs text-slate-500 mt-1">
                         Leave empty to allow all IPs.
@@ -1153,29 +1366,52 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
                     Defaults
                   </h3>
                   <div className="space-y-4">
-                    <Input label="Default Currency" defaultValue="USD ($)" />
+                    <Input
+                      label="Default Currency"
+                      value={settingsForm.defaultCurrency}
+                      onChange={(e) => setSettingsForm({ ...settingsForm, defaultCurrency: e.target.value })}
+                    />
                     <div className="grid grid-cols-2 gap-4">
                       <Input
                         label="Trial Period (Days)"
                         type="number"
-                        defaultValue="14"
+                        value={settingsForm.trialPeriodDays}
+                        onChange={(e) =>
+                          setSettingsForm({
+                            ...settingsForm,
+                            trialPeriodDays: Number(e.target.value || 0),
+                          })
+                        }
                       />
                       <Input
                         label="Grace Period (Days)"
                         type="number"
-                        defaultValue="7"
+                        value={settingsForm.gracePeriodDays}
+                        onChange={(e) =>
+                          setSettingsForm({
+                            ...settingsForm,
+                            gracePeriodDays: Number(e.target.value || 0),
+                          })
+                        }
                       />
                     </div>
                     <div className="p-4 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700">
                       <div className="flex justify-between items-center mb-2">
                         <span className="font-medium">Standard Plan Price</span>
-                        <span className="font-bold text-lg">$499/mo</span>
+                        <span className="font-bold text-lg">${settingsForm.standardPlanPrice}/mo</span>
                       </div>
                       <input
                         type="range"
                         min="100"
                         max="1000"
                         step="50"
+                        value={settingsForm.standardPlanPrice}
+                        onChange={(e) =>
+                          setSettingsForm({
+                            ...settingsForm,
+                            standardPlanPrice: Number(e.target.value),
+                          })
+                        }
                         className="w-full accent-indigo-600"
                       />
                     </div>
@@ -1199,5 +1435,3 @@ const SuperAdminView: React.FC<{ currentView: string }> = ({ currentView }) => {
 };
 
 export default SuperAdminView;
-
-
