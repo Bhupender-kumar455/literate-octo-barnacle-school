@@ -1772,15 +1772,16 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
                                     </div>
                                 )}
                                 {(() => {
-                                    const status = teacher.is_active;
-                                    const isActive = status == true || String(status).toLowerCase() === '1' || String(status).toLowerCase() === 'true';
-                                    let text = '';
-                                    let variant = '';
-                                    if (isActive) { text = 'Active'; variant = 'success'; }
-                                    else if (status == false || String(status).toLowerCase() === '0') { text = 'Inactive'; variant = 'danger'; }
-                                    else { text = 'Unknown'; variant = 'secondary'; }
-                                    return <Badge variant={variant}>{text}</Badge>;
-                                })()}
+                                        const status = teacher.is_active;
+                                        const statusStr = String(status).toLowerCase();
+                                        const isActive = status === true || statusStr === '1' || statusStr === 'true';
+                                        let text = '';
+                                        let variant = '';
+                                        if (isActive) { text = 'Active'; variant = 'success'; }
+                                        else if (status === false || statusStr === '0') { text = 'Inactive'; variant = 'danger'; }
+                                        else { text = 'Unknown'; variant = 'secondary'; }
+                                        return <Badge variant={variant}>{text}</Badge>;
+                                    })()}
                             </div>
                             <h3 className="text-lg font-bold text-slate-900 dark:text-white">{teacher.name}</h3>
                             <p className="text-sm text-slate-500 mb-4">{teacher.department || 'N/A'}</p>
