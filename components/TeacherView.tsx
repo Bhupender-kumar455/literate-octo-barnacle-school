@@ -189,6 +189,13 @@ const TeacherView: React.FC<{ currentView: string; user: User }> = ({ currentVie
     fetchLeaves();
   }, [currentView]);
 
+  // When user explicitly opens dashboard, keep it as dashboard (not active attendance session).
+  React.useEffect(() => {
+    if (currentView === 'dashboard') {
+      setActiveSession(null);
+    }
+  }, [currentView]);
+
   const handleSubmitLeave = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -269,6 +276,7 @@ const TeacherView: React.FC<{ currentView: string; user: User }> = ({ currentVie
   const currentClassLabel = activeSchedule
     ? `${activeSchedule?.grade || ''}${activeSchedule?.section ? `-${activeSchedule.section}` : ''}`
     : 'Class';
+  const isDirectAttendanceView = currentView === 'attendance';
 
   const parseStartTime = (timeRange?: string) => {
     const start = String(timeRange || '').split('-')[0]?.trim();
@@ -752,7 +760,7 @@ const TeacherView: React.FC<{ currentView: string; user: User }> = ({ currentVie
     <div className="max-w-5xl mx-auto space-y-8 animate-in fade-in duration-500">
 
       {/* Hero Schedule Card */}
-      {!activeSession ? (
+      {!activeSession && !isDirectAttendanceView ? (
         <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-indigo-600 to-violet-700 text-white p-8 shadow-xl shadow-indigo-500/20">
           <div className="absolute top-0 right-0 -mt-10 -mr-10 w-64 h-64 bg-white/10 rounded-full blur-3xl"></div>
 
@@ -795,7 +803,9 @@ const TeacherView: React.FC<{ currentView: string; user: User }> = ({ currentVie
         <div className="space-y-6">
           <div className="flex items-center justify-between">
             <div>
-              <Button variant="ghost" size="sm" onClick={() => setActiveSession(null)} className="mb-2">&lt;- Back to Schedule</Button>
+              {!isDirectAttendanceView && (
+                <Button variant="ghost" size="sm" onClick={() => setActiveSession(null)} className="mb-2">&lt;- Back to Schedule</Button>
+              )}
               <h2 className="text-2xl font-bold flex items-center gap-2">
                 <Clock className="text-indigo-600" /> Attendance: {currentClassLabel}
               </h2>
@@ -878,7 +888,7 @@ const TeacherView: React.FC<{ currentView: string; user: User }> = ({ currentVie
       )}
 
       {/* Upcoming Schedule */}
-      {!activeSession && (
+      {!activeSession && !isDirectAttendanceView && (
         <div className="grid md:grid-cols-2 gap-6">
           <Card>
             <h3 className="font-bold text-lg mb-4">Next Classes</h3>

@@ -480,6 +480,16 @@ export const submitTeacherLeave = async (payload: any) => {
   return res.data;
 };
 
+export const getTeacherPortalNotifications = async (limit?: number) => {
+  const res = await api.get("/teacher/notifications", { params: { limit } });
+  return res.data;
+};
+
+export const markTeacherPortalNotificationRead = async (id: number | string) => {
+  const res = await api.put(`/teacher/notifications/${id}/read`);
+  return res.data;
+};
+
 export const getStudentLeaves = async () => {
   const res = await api.get("/student/portal/leaves");
   return res.data;

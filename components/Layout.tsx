@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { User, UserRole } from '../types';
+import { getNotifications, getStudentPortalNotifications, markStudentPortalNotificationRead, getTeacherPortalNotifications, markTeacherPortalNotificationRead } from '../services/api';
 import {
   LayoutDashboard,
   Users,
@@ -19,7 +20,8 @@ import {
   Megaphone,
   Sun,
   Moon,
-  Calendar
+  Calendar,
+  RefreshCw
 } from 'lucide-react';
 import { Button, Badge } from './UIComponents';
 
@@ -35,6 +37,59 @@ interface LayoutProps {
 
 const Layout: React.FC<LayoutProps> = ({ user, children, onLogout, currentView, onChangeView, isDark, toggleTheme }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isNotificationModalOpen, setIsNotificationModalOpen] = useState(false);
+  const [notificationItems, setNotificationItems] = useState<any[]>([]);
+  const [isNotificationLoading, setIsNotificationLoading] = useState(false);
+  const [notificationError, setNotificationError] = useState('');
+  const canOpenNotifications = user.role === UserRole.ADMIN || user.role === UserRole.STUDENT || user.role === UserRole.TEACHER;
+
+  const fetchBellNotifications = async () => {
+    if (!canOpenNotifications) return;
+    setIsNotificationLoading(true);
+    setNotificationError('');
+    try {
+      if (user.role === UserRole.ADMIN) {
+        const data = await getNotifications({ limit: 25 });
+        setNotificationItems(Array.isArray(data) ? data : []);
+      } else if (user.role === UserRole.TEACHER) {
+        const data = await getTeacherPortalNotifications(25);
+        setNotificationItems(Array.isArray(data) ? data : []);
+      } else {
+        const data = await getStudentPortalNotifications(25);
+        setNotificationItems(Array.isArray(data) ? data : []);
+      }
+    } catch (error) {
+      setNotificationError('Failed to load notifications');
+      setNotificationItems([]);
+    } finally {
+      setIsNotificationLoading(false);
+    }
+  };
+
+  const handleBellClick = async () => {
+    if (!canOpenNotifications) return;
+    setIsNotificationModalOpen(true);
+    await fetchBellNotifications();
+  };
+
+  const handleMarkNotificationRead = async (id: number | string) => {
+    try {
+      if (user.role === UserRole.TEACHER) {
+        await markTeacherPortalNotificationRead(id);
+      } else {
+        await markStudentPortalNotificationRead(id);
+      }
+      setNotificationItems((prev) =>
+        prev.map((item) =>
+          String(item.id) === String(id)
+            ? { ...item, status: 'read', read_at: new Date().toISOString() }
+            : item
+        )
+      );
+    } catch (error) {
+      // Keep modal stable even if marking read fails.
+    }
+  };
 
   const getRoleBadge = () => {
     if (user.role === UserRole.SUPER_ADMIN) return { code: 'SA', label: 'System Admin' };
@@ -87,7 +142,8 @@ const Layout: React.FC<LayoutProps> = ({ user, children, onLogout, currentView, 
         { id: 'assignments', label: 'Assignments', icon: BookOpen },
         { id: 'grades', label: 'Grades', icon: GraduationCap },
         { id: 'leaves', label: 'Leaves', icon: Calendar },
-        { id: 'history', label: 'History', icon: BarChart3 },
+        { id: 'notifications', label: 'Notifications', icon: Bell },
+        { id: 'history', label: 'My Attendance', icon: BarChart3 },
       ];
     }
   };
@@ -103,6 +159,87 @@ const Layout: React.FC<LayoutProps> = ({ user, children, onLogout, currentView, 
           className="fixed inset-0 bg-black/50 z-40 md:hidden backdrop-blur-sm"
           onClick={() => setIsMobileMenuOpen(false)}
         />
+      )}
+
+      {/* Notification Modal */}
+      {isNotificationModalOpen && (
+        <div
+          className="fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm flex items-start justify-center p-4"
+          onClick={() => setIsNotificationModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-2xl mt-14 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-2xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800">
+              <h3 className="font-bold text-lg">Notifications</h3>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={fetchBellNotifications}
+                  className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors"
+                  title="Refresh"
+                >
+                  <RefreshCw size={16} />
+                </button>
+                <button
+                  onClick={() => setIsNotificationModalOpen(false)}
+                  className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800 transition-colors"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+            </div>
+
+            <div className="max-h-[65vh] overflow-y-auto p-4 space-y-3">
+              {isNotificationLoading && (
+                <p className="text-sm text-slate-500">Loading notifications...</p>
+              )}
+              {!isNotificationLoading && notificationError && (
+                <p className="text-sm text-red-500">{notificationError}</p>
+              )}
+              {!isNotificationLoading && !notificationError && notificationItems.length === 0 && (
+                <p className="text-sm text-slate-500">No notifications found.</p>
+              )}
+
+              {!isNotificationLoading && !notificationError && notificationItems.map((item) => (
+                <div
+                  key={`bell-notification-${item.id}`}
+                  className="p-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-sm text-slate-900 dark:text-slate-100 truncate">
+                        {item.title || 'Notification'}
+                      </p>
+                      <p className="text-sm text-slate-600 dark:text-slate-300 mt-1 break-words">
+                        {item.message}
+                      </p>
+                      <p className="text-xs text-slate-500 mt-2">
+                        {item.created_at || item.sent_at || item.scheduled_at || '-'}
+                      </p>
+                    </div>
+                    <div className="flex flex-col items-end gap-2 shrink-0">
+                      <Badge
+                        variant={item.status === 'read' || item.status === 'sent' ? 'success' : item.status === 'failed' ? 'danger' : 'warning'}
+                      >
+                        {item.status || 'queued'}
+                      </Badge>
+                      {(user.role === UserRole.STUDENT || user.role === UserRole.TEACHER) && item.status !== 'read' && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleMarkNotificationRead(item.id)}
+                        >
+                          Mark Read
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Sidebar */}
@@ -198,7 +335,14 @@ const Layout: React.FC<LayoutProps> = ({ user, children, onLogout, currentView, 
                 {isDark ? <Sun size={20} /> : <Moon size={20} />}
               </button>
 
-              <button className="relative p-2 text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800 rounded-full transition-colors">
+              <button
+                onClick={handleBellClick}
+                className={`relative p-2 rounded-full transition-colors ${canOpenNotifications
+                  ? 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800'
+                  : 'text-slate-300 dark:text-slate-600 cursor-not-allowed'
+                  }`}
+                title={canOpenNotifications ? 'Open Notifications' : 'Notifications not available for this role'}
+              >
                 <Bell size={20} />
                 <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full ring-2 ring-white dark:ring-slate-900"></span>
               </button>

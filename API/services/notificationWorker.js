@@ -118,19 +118,34 @@ const resolveRecipients = async (notification) => {
   }
 
   if (notification.recipient_type === 'teacher') {
+    if (notification.recipient_id) {
+      const result = await pool.request()
+        .input('teacher_id', sql.BigInt, notification.recipient_id)
+        .input('school_id', sql.BigInt, notification.school_id)
+        .query(`
+          SELECT u.email, u.phone
+          FROM teachers t
+          JOIN users u ON u.id = t.user_id
+          WHERE t.id = @teacher_id AND t.school_id = @school_id
+        `);
+      const row = result.recordset[0] || {};
+      return {
+        emails: dedupeValues([row.email]),
+        phones: dedupeValues([row.phone]),
+      };
+    }
+
     const result = await pool.request()
-      .input('teacher_id', sql.BigInt, notification.recipient_id)
       .input('school_id', sql.BigInt, notification.school_id)
       .query(`
         SELECT u.email, u.phone
         FROM teachers t
         JOIN users u ON u.id = t.user_id
-        WHERE t.id = @teacher_id AND t.school_id = @school_id
+        WHERE t.school_id = @school_id
       `);
-    const row = result.recordset[0] || {};
     return {
-      emails: dedupeValues([row.email]),
-      phones: dedupeValues([row.phone]),
+      emails: dedupeValues(result.recordset.map((r) => r.email)),
+      phones: dedupeValues(result.recordset.map((r) => r.phone)),
     };
   }
 

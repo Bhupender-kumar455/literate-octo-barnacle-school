@@ -80,6 +80,7 @@ app.use('/api/teacher/students', require('./Routers/teacher/students'));
 app.use('/api/teacher/grades', require('./Routers/teacher/grades'));
 app.use('/api/teacher/assignments', require('./Routers/teacher/assignments'));
 app.use('/api/teacher/leaves', require('./Routers/teacher/leaves'));
+app.use('/api/teacher/notifications', require('./Routers/teacher/notifications'));
 app.use('/api/billing', require('./Routers/billing/stripe'));
 app.use('/api/superadmin/users', require('./Routers/superadmin/users'));
 app.use('/api/superadmin/audit', require('./Routers/superadmin/audit'));

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { API_BASE_URL, getAdminStats, getTeachers, getClasses, getStudents, getAnnouncements, getFeesStats, getInvoices, getReportDownloads, logReportDownload, getAttendanceReport, getFeeReport, getAcademicReport, downloadAttendanceCsv, downloadFeeCsv, downloadAcademicCsv, downloadStudentsCsv, downloadInvoicesCsv, downloadStudentsPdf, downloadInvoicesPdf, downloadAttendancePdf, downloadFeePdf, downloadAcademicPdf, getGrades, createGrade, createStudent, createAnnouncement, createInvoice, updateInvoiceStatus, getSubjects, createSubject, getClassSubjects, createClassSubject, getScheduleEntries, createScheduleEntry, deleteScheduleEntry, updateTeacher, deleteTeacher, updateStudent, getStudentReportCardTerms, getStudentReportCard, downloadStudentReportCardPdf, getNotificationTemplates, createNotificationTemplate, getNotifications, queueNotification, triggerFeeDueNotifications, updateNotificationStatus, runNotificationDispatchNow, getAdminLeaves, updateAdminLeaveStatus } from '../services/api';
+import { API_BASE_URL, getAdminStats, getTeachers, getClasses, createClass, getStudents, getAnnouncements, getFeesStats, getInvoices, getReportDownloads, logReportDownload, getAttendanceReport, getFeeReport, getAcademicReport, downloadAttendanceCsv, downloadFeeCsv, downloadAcademicCsv, downloadStudentsCsv, downloadInvoicesCsv, downloadStudentsPdf, downloadInvoicesPdf, downloadAttendancePdf, downloadFeePdf, downloadAcademicPdf, getGrades, createGrade, createStudent, createAnnouncement, createInvoice, updateInvoiceStatus, getSubjects, createSubject, getClassSubjects, createClassSubject, getScheduleEntries, createScheduleEntry, deleteScheduleEntry, updateTeacher, deleteTeacher, updateStudent, getStudentReportCardTerms, getStudentReportCard, downloadStudentReportCardPdf, getNotificationTemplates, createNotificationTemplate, getNotifications, queueNotification, triggerFeeDueNotifications, updateNotificationStatus, runNotificationDispatchNow, getAdminLeaves, updateAdminLeaveStatus } from '../services/api';
 import { Card, Button, StatCard, Badge, Input } from './UIComponents';
 import {
     Users,
@@ -44,6 +44,27 @@ const reportTypes = [
     { id: 3, title: 'Fee Collection', description: 'Revenue reports, pending dues and invoice history.', icon: DollarSign, color: 'text-amber-600', bg: 'bg-amber-100' },
     { id: 4, title: 'Student Behaviour', description: 'Disciplinary records and merit points log.', icon: Users, color: 'text-purple-600', bg: 'bg-purple-100' },
 ];
+
+const getDefaultAcademicYear = () => {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const startYear = now.getMonth() >= 3 ? currentYear : currentYear - 1;
+    return `${startYear}-${startYear + 1}`;
+};
+
+const createDefaultClassSetup = () => ({
+    auto_assign_subject: true,
+    subject_mode: 'existing',
+    subject_id: '',
+    subject_name: '',
+    subject_code: '',
+    subject_teacher_id: '',
+    add_schedule: false,
+    day_of_week: 'Monday',
+    start_time: '09:00',
+    end_time: '10:00',
+    room: '',
+});
 
 const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView, user }) => {
     const [stats, setStats] = useState({
@@ -96,13 +117,19 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
     const [announcements, setAnnouncements] = useState<any[]>([]);
     const [feesStats, setFeesStats] = useState<{ total_students: number; collected: number; pending: number } | null>(null);
     const [attendanceData, setAttendanceData] = useState<any[]>(emptyAttendanceData);
+    const [attendanceRows, setAttendanceRows] = useState<any[]>([]);
+    const [attendanceFrom, setAttendanceFrom] = useState('');
+    const [attendanceTo, setAttendanceTo] = useState('');
+    const [isAttendanceLoading, setIsAttendanceLoading] = useState(false);
     const [newClass, setNewClass] = useState({
         grade: '',
         section: '',
-        academicYear: '',
+        academicYear: getDefaultAcademicYear(),
         teacherId: '',
         roomNumber: ''
     });
+    const [classSetup, setClassSetup] = useState(createDefaultClassSetup());
+    const [isClassSetupSaving, setIsClassSetupSaving] = useState(false);
     const [schoolNameForCodes, setSchoolNameForCodes] = useState('');
     const [newTeacher, setNewTeacher] = useState({
         name: '',
@@ -171,10 +198,14 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
     const [newNotification, setNewNotification] = useState({
         recipient_type: 'school',
         recipient_id: '',
+        recipient_ids: [] as string[],
+        teacher_target_mode: 'single',
         channel: 'in_app',
+        template_id: '',
         title: '',
         message: '',
         scheduled_at: '',
+        metadata: '',
     });
     const [newTemplate, setNewTemplate] = useState({
         name: '',
@@ -335,6 +366,9 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
             fetchStats();
             fetchAttendanceChart();
         }
+        if (currentView === 'attendance') {
+            fetchAttendanceChart(attendanceFrom || undefined, attendanceTo || undefined);
+        }
         if (currentView === 'students') {
             fetchStudents();
             fetchClasses();
@@ -380,17 +414,33 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
         }
     };
 
-    const fetchAttendanceChart = async () => {
+    const fetchAttendanceChart = async (from?: string, to?: string) => {
+        setIsAttendanceLoading(true);
         try {
-            const data = await getAttendanceReport();
-            const mapped = (Array.isArray(data) ? data : []).slice(0, 7).reverse().map((row: any) => ({
-                name: String(row.date).slice(5),
+            const data = await getAttendanceReport(from, to);
+            const rows = Array.isArray(data) ? data : [];
+            setAttendanceRows(rows);
+            const getChartLabel = (value: any) => {
+                const dt = new Date(value);
+                if (Number.isNaN(dt.getTime())) return String(value || '').slice(0, 10);
+                return `${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+            };
+            const mapped = rows.slice(0, 7).reverse().map((row: any) => ({
+                name: getChartLabel(row.date),
                 present: row.present || 0,
                 absent: row.absent || 0,
+                late: row.late || 0,
             }));
             setAttendanceData(mapped);
         } catch (error) {
             console.error("Error fetching attendance chart:", error);
+            setAttendanceRows([]);
+            setAttendanceData([]);
+            if (currentView === 'attendance') {
+                toast.error("Failed to load attendance data");
+            }
+        } finally {
+            setIsAttendanceLoading(false);
         }
     };
 
@@ -568,31 +618,72 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
     };
 
     const handleQueueNotification = async () => {
-        if (!newNotification.message.trim()) {
+        if (!newNotification.template_id && !newNotification.message.trim()) {
             toast.error("Message is required");
             return;
         }
-        if (newNotification.recipient_type !== 'school' && !newNotification.recipient_id) {
+        if (newNotification.recipient_type === 'student' && !newNotification.recipient_id) {
             toast.error("Please select a recipient");
             return;
         }
+        if (newNotification.recipient_type === 'teacher') {
+            if (newNotification.teacher_target_mode === 'single' && !newNotification.recipient_id) {
+                toast.error("Please select a teacher");
+                return;
+            }
+            if (newNotification.teacher_target_mode === 'multiple' && !newNotification.recipient_ids.length) {
+                toast.error("Please select one or more teachers");
+                return;
+            }
+        }
         try {
-            await queueNotification({
+            let metadataPayload: Record<string, any> | null = null;
+            if (newNotification.metadata.trim()) {
+                try {
+                    const parsed = JSON.parse(newNotification.metadata);
+                    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+                        toast.error("Metadata must be a JSON object");
+                        return;
+                    }
+                    metadataPayload = parsed;
+                } catch {
+                    toast.error("Metadata must be valid JSON");
+                    return;
+                }
+            }
+
+            const payload: any = {
                 recipient_type: newNotification.recipient_type,
-                recipient_id: newNotification.recipient_type === 'school' ? null : (newNotification.recipient_id || null),
+                recipient_id: (newNotification.recipient_type === 'school'
+                    || (newNotification.recipient_type === 'teacher' && newNotification.teacher_target_mode !== 'single')
+                    || !newNotification.recipient_id)
+                    ? null
+                    : (newNotification.recipient_id || null),
+                recipient_ids: (newNotification.recipient_type === 'teacher' && newNotification.teacher_target_mode === 'multiple')
+                    ? newNotification.recipient_ids
+                    : [],
                 channel: newNotification.channel,
+                template_id: newNotification.template_id || null,
                 title: newNotification.title || null,
-                message: newNotification.message,
+                message: newNotification.message || null,
                 scheduled_at: newNotification.scheduled_at || null,
-            });
-            toast.success("Notification queued");
+                metadata: metadataPayload,
+            };
+
+            const result = await queueNotification(payload);
+            const queuedCount = Number(result?.queued || 0);
+            toast.success(queuedCount > 1 ? `${queuedCount} notifications queued` : "Notification queued");
             setNewNotification({
                 recipient_type: 'school',
                 recipient_id: '',
+                recipient_ids: [],
+                teacher_target_mode: 'single',
                 channel: 'in_app',
+                template_id: '',
                 title: '',
                 message: '',
                 scheduled_at: '',
+                metadata: '',
             });
             fetchNotifications();
         } catch (err: any) {
@@ -1064,6 +1155,31 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
         }
     };
 
+    const resetCreateClassForm = (options?: { preferNewSubject?: boolean }) => {
+        setNewClass({
+            grade: '',
+            section: '',
+            academicYear: getDefaultAcademicYear(),
+            teacherId: '',
+            roomNumber: ''
+        });
+        const setup = createDefaultClassSetup();
+        if (options?.preferNewSubject) {
+            setup.subject_mode = 'new';
+        }
+        setClassSetup(setup);
+    };
+
+    const openCreateClassModal = () => {
+        resetCreateClassForm({ preferNewSubject: subjects.length === 0 });
+        setShowCreateClassModal(true);
+    };
+
+    const closeCreateClassModal = () => {
+        setShowCreateClassModal(false);
+        resetCreateClassForm();
+    };
+
     const openStudentProfile = (student: Student, editMode: boolean = false) => {
         setSelectedStudent(student);
         setStudentForm(student);
@@ -1161,38 +1277,120 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
         }
     };
 
-    // create classs method 
+    // create class + optional quick subject setup
     const handleCreateClass = async () => {
+        const grade = String(newClass.grade || '').trim();
+        const section = String(newClass.section || '').trim();
+        const academicYear = String(newClass.academicYear || '').trim() || getDefaultAcademicYear();
+        const classTeacherId = newClass.teacherId ? Number(newClass.teacherId) : null;
+        const shouldAutoAssignSubject = classSetup.auto_assign_subject;
+        const preferredSubjectTeacherId = Number(classSetup.subject_teacher_id || newClass.teacherId);
+
+        if (!grade || !section) {
+            toast.error("Grade and section are required");
+            return;
+        }
+
+        if (shouldAutoAssignSubject && !Number.isFinite(preferredSubjectTeacherId)) {
+            toast.error("Select a teacher for subject assignment");
+            return;
+        }
+
+        if (shouldAutoAssignSubject && classSetup.subject_mode === 'existing' && !classSetup.subject_id) {
+            toast.error("Select a subject or switch to New Subject");
+            return;
+        }
+
+        if (shouldAutoAssignSubject && classSetup.subject_mode === 'new' && !String(classSetup.subject_name || '').trim()) {
+            toast.error("Subject name is required for new subject");
+            return;
+        }
+
+        if (classSetup.add_schedule && (!classSetup.start_time || !classSetup.end_time)) {
+            toast.error("Start time and end time are required for schedule");
+            return;
+        }
+
+        setIsClassSetupSaving(true);
         try {
-            const payload = {
-                grade: newClass.grade,
-                section: newClass.section,
-                academic_year: newClass.academicYear,
-                class_teacher_id: newClass.teacherId || null,
+            const classResult = await createClass({
+                grade,
+                section,
+                academic_year: academicYear,
+                class_teacher_id: Number.isFinite(classTeacherId as number) ? classTeacherId : null,
                 room_number: newClass.roomNumber || null,
                 school_id: user.school_id
-            };
-
-            const res = await fetch(`${API_BASE_URL}/api/admin/classes`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('token')}`
-                },
-                body: JSON.stringify(payload)
             });
 
-            if (res.ok) {
-                toast.success("New class group created successfully");
-                setShowCreateClassModal(false);
-                setNewClass({ grade: '', section: '', academicYear: '', teacherId: '', roomNumber: '' });
-                fetchClasses(); // Refresh the classes list
-            } else {
-                const err = await res.json();
-                toast.error(err.message || "Failed to create class");
+            const classId = Number(classResult?.id);
+            if (!Number.isFinite(classId)) {
+                throw new Error("Class created but class ID was not returned");
             }
-        } catch (error) {
-            toast.error("Error creating class");
+
+            let classSubjectId: number | null = null;
+            if (shouldAutoAssignSubject) {
+                let subjectId: number | null = null;
+                if (classSetup.subject_mode === 'existing') {
+                    subjectId = Number(classSetup.subject_id);
+                } else {
+                    const subjectName = String(classSetup.subject_name || '').trim();
+                    const subjectCode = String(classSetup.subject_code || '').trim() || generateSubjectCode(subjectName);
+                    try {
+                        const subjectCreateRes = await createSubject({ name: subjectName, code: subjectCode });
+                        subjectId = Number(subjectCreateRes?.id);
+                    } catch (err: any) {
+                        if (err?.response?.status === 409) {
+                            const subjectList = await getSubjects();
+                            const normalizedName = subjectName.toLowerCase();
+                            const existing = (Array.isArray(subjectList) ? subjectList : [])
+                                .find((item: any) => String(item?.name || '').trim().toLowerCase() === normalizedName);
+                            if (!existing?.id) {
+                                throw err;
+                            }
+                            subjectId = Number(existing.id);
+                        } else {
+                            throw err;
+                        }
+                    }
+                }
+
+                if (!Number.isFinite(subjectId as number)) {
+                    throw new Error("Subject setup failed");
+                }
+
+                const classSubjectRes = await createClassSubject({
+                    class_id: classId,
+                    subject_id: subjectId,
+                    teacher_id: preferredSubjectTeacherId,
+                });
+                classSubjectId = Number(classSubjectRes?.id || 0) || null;
+
+                if (classSetup.add_schedule) {
+                    if (!classSubjectId) {
+                        toast.warning("Class created and subject assigned, but schedule could not be linked automatically.");
+                    } else {
+                        await createScheduleEntry({
+                            class_subject_id: classSubjectId,
+                            day_of_week: classSetup.day_of_week,
+                            start_time: classSetup.start_time,
+                            end_time: classSetup.end_time,
+                            room: classSetup.room || null,
+                        });
+                    }
+                }
+            }
+
+            toast.success(
+                shouldAutoAssignSubject
+                    ? "Class setup completed (class + subject assignment)"
+                    : "New class group created successfully"
+            );
+            closeCreateClassModal();
+            await Promise.all([fetchClasses(), fetchSubjects(), fetchClassSubjects(), fetchScheduleEntries()]);
+        } catch (error: any) {
+            toast.error(error?.response?.data?.message || error?.message || "Failed to create class setup");
+        } finally {
+            setIsClassSetupSaving(false);
         }
     };
 
@@ -2396,7 +2594,7 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
                         </Button>
                         <Button variant="outline" icon={GraduationCap} onClick={() => setShowAssignModal(true)}>Assign Subject</Button>
                         <Button variant="outline" icon={CalendarDays} onClick={() => setShowScheduleModal(true)}>Add Schedule</Button>
-                        <Button icon={Plus} onClick={() => setShowCreateClassModal(true)}>Create Class</Button>
+                        <Button icon={Plus} onClick={openCreateClassModal}>Create Class</Button>
                     </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -2569,8 +2767,9 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
 
                 {showCreateClassModal && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-                        <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-lg p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
-                            <h3 className="text-xl font-bold mb-6">Create New Class Group</h3>
+                        <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-2xl p-6 shadow-2xl border border-slate-200 dark:border-slate-800 max-h-[90vh] overflow-y-auto">
+                            <h3 className="text-xl font-bold mb-2">Create Class Setup</h3>
+                            <p className="text-sm text-slate-500 mb-6">Recommended: create class, assign first subject, and assign teacher in one step.</p>
                             <div className="space-y-4">
                                 <div className="grid grid-cols-2 gap-4">
                                     <Input
@@ -2594,11 +2793,19 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
                                 />
 
                                 <div>
-                                    <label className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5 block">Assign Class Teacher</label>
+                                    <label className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5 block">Class Teacher</label>
                                     <select
                                         className="w-full rounded-xl border border-slate-200 bg-white/50 px-4 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-800"
                                         value={newClass.teacherId}
-                                        onChange={(e) => setNewClass({ ...newClass, teacherId: e.target.value })}
+                                        onChange={(e) => {
+                                            const teacherId = e.target.value;
+                                            setNewClass({ ...newClass, teacherId });
+                                            setClassSetup((prev) => (
+                                                prev.subject_teacher_id
+                                                    ? prev
+                                                    : { ...prev, subject_teacher_id: teacherId }
+                                            ));
+                                        }}
                                     >
                                         <option value="">Select a teacher...</option>
                                         {teachers.map(t => (
@@ -2614,10 +2821,145 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
                                         onChange={(e) => setNewClass({ ...newClass, roomNumber: e.target.value })}
                                     />
                                 </div>
+
+                                <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 space-y-4">
+                                    <div className="flex items-center justify-between gap-3">
+                                        <div>
+                                            <p className="font-semibold text-sm">Quick Subject Setup</p>
+                                            <p className="text-xs text-slate-500">Assign first subject to this class now.</p>
+                                        </div>
+                                        <label className="inline-flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+                                            <input
+                                                type="checkbox"
+                                                checked={classSetup.auto_assign_subject}
+                                                onChange={(e) => setClassSetup({ ...classSetup, auto_assign_subject: e.target.checked })}
+                                            />
+                                            Enable
+                                        </label>
+                                    </div>
+
+                                    {classSetup.auto_assign_subject && (
+                                        <div className="space-y-4">
+                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                <div>
+                                                    <label className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5 block">Subject Type</label>
+                                                    <select
+                                                        className="w-full rounded-xl border border-slate-200 bg-white/50 px-4 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-800"
+                                                        value={classSetup.subject_mode}
+                                                        onChange={(e) => setClassSetup({
+                                                            ...classSetup,
+                                                            subject_mode: e.target.value,
+                                                            subject_id: '',
+                                                            subject_name: '',
+                                                            subject_code: '',
+                                                        })}
+                                                    >
+                                                        <option value="existing">Use Existing Subject</option>
+                                                        <option value="new">Create New Subject</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5 block">Subject Teacher</label>
+                                                    <select
+                                                        className="w-full rounded-xl border border-slate-200 bg-white/50 px-4 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-800"
+                                                        value={classSetup.subject_teacher_id}
+                                                        onChange={(e) => setClassSetup({ ...classSetup, subject_teacher_id: e.target.value })}
+                                                    >
+                                                        <option value="">Select teacher</option>
+                                                        {teachers.map((t: any) => (
+                                                            <option key={`class-setup-teacher-${t.id}`} value={String(t.id)}>{t.name}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            </div>
+
+                                            {classSetup.subject_mode === 'existing' && (
+                                                <div>
+                                                    <label className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5 block">Subject</label>
+                                                    <select
+                                                        className="w-full rounded-xl border border-slate-200 bg-white/50 px-4 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-800"
+                                                        value={classSetup.subject_id}
+                                                        onChange={(e) => setClassSetup({ ...classSetup, subject_id: e.target.value })}
+                                                    >
+                                                        <option value="">Select subject</option>
+                                                        {subjects.map((s: any) => (
+                                                            <option key={`class-setup-subject-${s.id}`} value={String(s.id)}>{s.name}</option>
+                                                        ))}
+                                                    </select>
+                                                </div>
+                                            )}
+
+                                            {classSetup.subject_mode === 'new' && (
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                                    <Input
+                                                        label="New Subject Name"
+                                                        value={classSetup.subject_name}
+                                                        onChange={(e) => setClassSetup({ ...classSetup, subject_name: e.target.value })}
+                                                    />
+                                                    <Input
+                                                        label="Subject Code (Optional)"
+                                                        placeholder="Auto if empty"
+                                                        value={classSetup.subject_code}
+                                                        onChange={(e) => setClassSetup({ ...classSetup, subject_code: e.target.value.toUpperCase() })}
+                                                    />
+                                                </div>
+                                            )}
+
+                                            <div className="rounded-lg bg-slate-50 dark:bg-slate-800/60 p-3">
+                                                <label className="inline-flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={classSetup.add_schedule}
+                                                        onChange={(e) => setClassSetup({ ...classSetup, add_schedule: e.target.checked })}
+                                                    />
+                                                    Add first schedule entry now
+                                                </label>
+
+                                                {classSetup.add_schedule && (
+                                                    <div className="mt-3 space-y-3">
+                                                        <div>
+                                                            <label className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5 block">Day</label>
+                                                            <select
+                                                                className="w-full rounded-xl border border-slate-200 bg-white/50 px-4 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-800"
+                                                                value={classSetup.day_of_week}
+                                                                onChange={(e) => setClassSetup({ ...classSetup, day_of_week: e.target.value })}
+                                                            >
+                                                                {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'].map(d => (
+                                                                    <option key={`class-setup-day-${d}`} value={d}>{d}</option>
+                                                                ))}
+                                                            </select>
+                                                        </div>
+                                                        <div className="grid grid-cols-2 gap-3">
+                                                            <Input
+                                                                label="Start Time"
+                                                                type="time"
+                                                                value={classSetup.start_time}
+                                                                onChange={(e) => setClassSetup({ ...classSetup, start_time: e.target.value })}
+                                                            />
+                                                            <Input
+                                                                label="End Time"
+                                                                type="time"
+                                                                value={classSetup.end_time}
+                                                                onChange={(e) => setClassSetup({ ...classSetup, end_time: e.target.value })}
+                                                            />
+                                                        </div>
+                                                        <Input
+                                                            label="Room (Optional)"
+                                                            value={classSetup.room}
+                                                            onChange={(e) => setClassSetup({ ...classSetup, room: e.target.value })}
+                                                        />
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
                             </div>
                             <div className="flex justify-end gap-3 mt-8">
-                                <Button variant="outline" onClick={() => setShowCreateClassModal(false)}>Cancel</Button>
-                                <Button onClick={handleCreateClass}>Create Class</Button>
+                                <Button variant="outline" onClick={closeCreateClassModal} disabled={isClassSetupSaving}>Cancel</Button>
+                                <Button onClick={handleCreateClass} disabled={isClassSetupSaving}>
+                                    {isClassSetupSaving ? 'Saving...' : 'Save Class Setup'}
+                                </Button>
                             </div>
                         </div>
                     </div>
@@ -2785,12 +3127,60 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
     }
 
     if (currentView === 'attendance') {
+        const totals = attendanceRows.reduce(
+            (acc: { present: number; absent: number; late: number }, row: any) => ({
+                present: acc.present + Number(row?.present || 0),
+                absent: acc.absent + Number(row?.absent || 0),
+                late: acc.late + Number(row?.late || 0),
+            }),
+            { present: 0, absent: 0, late: 0 }
+        );
+        const totalMarked = totals.present + totals.absent + totals.late;
+        const avgAttendance = totalMarked ? Math.round((totals.present / totalMarked) * 100) : 0;
+        const latestRow = attendanceRows[0] || null;
+        const latestAbsent = Number(latestRow?.absent || 0);
+        const formatDateLabel = (value: string) => {
+            const dt = new Date(value);
+            if (Number.isNaN(dt.getTime())) return String(value || '-');
+            return dt.toLocaleDateString();
+        };
+
         return (
             <div className="space-y-6 animate-in fade-in duration-500">
                 <div className="flex justify-between items-center">
                     <h2 className="text-2xl font-bold">Attendance Overview</h2>
                     <div className="flex gap-2">
-                        <Input type="date" className="w-40" />
+                        <Input
+                            type="date"
+                            className="w-40"
+                            value={attendanceFrom}
+                            onChange={(e) => setAttendanceFrom(e.target.value)}
+                        />
+                        <Input
+                            type="date"
+                            className="w-40"
+                            value={attendanceTo}
+                            onChange={(e) => setAttendanceTo(e.target.value)}
+                        />
+                        <Button
+                            variant="outline"
+                            icon={Filter}
+                            onClick={() => fetchAttendanceChart(attendanceFrom || undefined, attendanceTo || undefined)}
+                            disabled={isAttendanceLoading}
+                        >
+                            Apply
+                        </Button>
+                        <Button
+                            variant="outline"
+                            onClick={() => {
+                                setAttendanceFrom('');
+                                setAttendanceTo('');
+                                fetchAttendanceChart();
+                            }}
+                            disabled={isAttendanceLoading}
+                        >
+                            Reset
+                        </Button>
                         <Button
                             variant="outline"
                             icon={Download}
@@ -2824,52 +3214,87 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
                                         />
                                         <Bar dataKey="present" name="Present" fill="#6366f1" radius={[4, 4, 0, 0]} />
                                         <Bar dataKey="absent" name="Absent" fill="#cbd5e1" radius={[4, 4, 0, 0]} />
+                                        <Bar dataKey="late" name="Late" fill="#f59e0b" radius={[4, 4, 0, 0]} />
                                     </BarChart>
                                 </ResponsiveContainer>
                             </div>
                         </Card>
                     </div>
                     <div className="space-y-6">
-                        <StatCard title="Avg Attendance" value="92%" icon={PieChart} trend="up" />
-                        <StatCard title="Absent Today" value="34" icon={Users} trend="down" />
+                        <StatCard
+                            title="Attendance %"
+                            value={`${avgAttendance}%`}
+                            icon={PieChart}
+                            trend={avgAttendance >= 75 ? 'up' : 'down'}
+                            subtext={totalMarked ? `${totalMarked} records` : 'No records'}
+                        />
+                        <StatCard
+                            title="Latest Absent"
+                            value={latestAbsent}
+                            icon={Users}
+                            trend={latestAbsent > 0 ? 'down' : 'up'}
+                            subtext={latestRow ? formatDateLabel(latestRow.date) : 'No data'}
+                        />
+                        <StatCard
+                            title="Total Late"
+                            value={totals.late}
+                            icon={AlertTriangle}
+                            subtext={attendanceRows.length ? `${attendanceRows.length} days` : 'No data'}
+                        />
                     </div>
                 </div>
 
                 <Card>
                     <div className="flex justify-between items-center mb-4">
-                        <h3 className="font-bold">Today's Class Submissions</h3>
-                        <Badge variant="success">Live Updates</Badge>
+                        <h3 className="font-bold">Attendance by Date</h3>
+                        <Badge variant="outline">{attendanceRows.length} rows</Badge>
                     </div>
-                    <table className="w-full text-sm">
-                        <thead>
-                            <tr className="text-left text-slate-500 border-b border-slate-100 dark:border-slate-800">
-                                <th className="pb-3 font-medium">Class</th>
-                                <th className="pb-3 font-medium">Teacher</th>
-                                <th className="pb-3 font-medium">Time</th>
-                                <th className="pb-3 font-medium">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                            <tr>
-                                <td className="py-3 font-bold">10-A</td>
-                                <td className="py-3">Teacher 1</td>
-                                <td className="py-3 text-slate-500">09:15 AM</td>
-                                <td className="py-3"><Badge variant="success">Submitted</Badge></td>
-                            </tr>
-                            <tr>
-                                <td className="py-3 font-bold">10-B</td>
-                                <td className="py-3">Teacher 2</td>
-                                <td className="py-3 text-slate-500">09:20 AM</td>
-                                <td className="py-3"><Badge variant="success">Submitted</Badge></td>
-                            </tr>
-                            <tr>
-                                <td className="py-3 font-bold">9-A</td>
-                                <td className="py-3">Teacher 3</td>
-                                <td className="py-3 text-slate-500">-</td>
-                                <td className="py-3"><Badge variant="warning">Pending</Badge></td>
-                            </tr>
-                        </tbody>
-                    </table>
+                    {isAttendanceLoading ? (
+                        <p className="text-sm text-slate-500">Loading attendance data...</p>
+                    ) : (
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="text-left text-slate-500 border-b border-slate-100 dark:border-slate-800">
+                                    <th className="pb-3 font-medium">Date</th>
+                                    <th className="pb-3 font-medium">Present</th>
+                                    <th className="pb-3 font-medium">Absent</th>
+                                    <th className="pb-3 font-medium">Late</th>
+                                    <th className="pb-3 font-medium">Attendance %</th>
+                                    <th className="pb-3 font-medium">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {attendanceRows.map((row: any) => {
+                                    const present = Number(row?.present || 0);
+                                    const absent = Number(row?.absent || 0);
+                                    const late = Number(row?.late || 0);
+                                    const dayTotal = present + absent + late;
+                                    const dayAttendance = dayTotal ? Math.round((present / dayTotal) * 100) : 0;
+                                    return (
+                                        <tr key={`attendance-day-${row.date}`}>
+                                            <td className="py-3 font-medium">{formatDateLabel(row.date)}</td>
+                                            <td className="py-3">{present}</td>
+                                            <td className="py-3">{absent}</td>
+                                            <td className="py-3">{late}</td>
+                                            <td className="py-3">{dayAttendance}%</td>
+                                            <td className="py-3">
+                                                <Badge variant={dayAttendance >= 90 ? 'success' : dayAttendance >= 75 ? 'warning' : 'danger'}>
+                                                    {dayAttendance >= 90 ? 'Excellent' : dayAttendance >= 75 ? 'Needs Attention' : 'Critical'}
+                                                </Badge>
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
+                                {attendanceRows.length === 0 && (
+                                    <tr>
+                                        <td colSpan={6} className="py-4 text-slate-500 text-center">
+                                            No attendance data found for selected dates.
+                                        </td>
+                                    </tr>
+                                )}
+                            </tbody>
+                        </table>
+                    )}
                 </Card>
             </div>
         );
@@ -3284,11 +3709,18 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
                                     <select
                                         className="w-full rounded-xl border border-slate-200 bg-white/50 px-4 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-800"
                                         value={newNotification.recipient_type}
-                                        onChange={(e) => setNewNotification({ ...newNotification, recipient_type: e.target.value, recipient_id: '' })}
+                                        onChange={(e) => setNewNotification({
+                                            ...newNotification,
+                                            recipient_type: e.target.value,
+                                            recipient_id: '',
+                                            recipient_ids: [],
+                                            teacher_target_mode: 'single'
+                                        })}
                                     >
                                         <option value="school">Entire School</option>
                                         <option value="student">Student</option>
                                         <option value="teacher">Teacher</option>
+                                        <option value="admin">Admin</option>
                                     </select>
                                 </div>
                                 <div>
@@ -3322,19 +3754,107 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
                                 </div>
                             )}
 
-                            {newNotification.recipient_type === 'teacher' && (
+                            {newNotification.recipient_type === 'admin' && (
                                 <div>
-                                    <label className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5 block">Teacher</label>
-                                    <select
-                                        className="w-full rounded-xl border border-slate-200 bg-white/50 px-4 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-800"
+                                    <Input
+                                        label="Admin User ID (Optional)"
                                         value={newNotification.recipient_id}
                                         onChange={(e) => setNewNotification({ ...newNotification, recipient_id: e.target.value })}
-                                    >
-                                        <option value="">Select teacher</option>
-                                        {teachers.map((t: any) => (
-                                            <option key={`notify-teacher-${t.id}`} value={t.id}>{t.name}</option>
-                                        ))}
-                                    </select>
+                                        placeholder="Leave empty to target all admins"
+                                    />
+                                    <p className="text-xs text-slate-500 mt-1">
+                                        If empty, notification is sent to all school admins.
+                                    </p>
+                                </div>
+                            )}
+
+                            <div>
+                                <label className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5 block">Template (Optional)</label>
+                                <select
+                                    className="w-full rounded-xl border border-slate-200 bg-white/50 px-4 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-800"
+                                    value={newNotification.template_id}
+                                    onChange={(e) => {
+                                        const templateId = e.target.value;
+                                        const template = notificationTemplates.find((tpl) => String(tpl.id) === templateId);
+                                        setNewNotification({
+                                            ...newNotification,
+                                            template_id: templateId,
+                                            channel: template?.channel || newNotification.channel,
+                                            title: template?.title_template || newNotification.title,
+                                            message: template?.message_template || newNotification.message,
+                                        });
+                                    }}
+                                >
+                                    <option value="">No template</option>
+                                    {notificationTemplates.map((tpl) => (
+                                        <option key={`queue-template-${tpl.id}`} value={String(tpl.id)}>
+                                            {tpl.name} ({tpl.channel})
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {newNotification.recipient_type === 'teacher' && (
+                                <div className="space-y-3">
+                                    <div>
+                                        <label className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5 block">Teacher Target</label>
+                                        <select
+                                            className="w-full rounded-xl border border-slate-200 bg-white/50 px-4 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-800"
+                                            value={newNotification.teacher_target_mode}
+                                            onChange={(e) => setNewNotification({
+                                                ...newNotification,
+                                                teacher_target_mode: e.target.value,
+                                                recipient_id: '',
+                                                recipient_ids: []
+                                            })}
+                                        >
+                                            <option value="single">Single Teacher</option>
+                                            <option value="multiple">Multiple Teachers</option>
+                                            <option value="all">All Teachers</option>
+                                        </select>
+                                    </div>
+
+                                    {newNotification.teacher_target_mode === 'single' && (
+                                        <div>
+                                            <label className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5 block">Teacher</label>
+                                            <select
+                                                className="w-full rounded-xl border border-slate-200 bg-white/50 px-4 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-800"
+                                                value={newNotification.recipient_id}
+                                                onChange={(e) => setNewNotification({ ...newNotification, recipient_id: e.target.value })}
+                                            >
+                                                <option value="">Select teacher</option>
+                                                {teachers.map((t: any) => (
+                                                    <option key={`notify-teacher-${t.id}`} value={t.id}>{t.name}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    )}
+
+                                    {newNotification.teacher_target_mode === 'multiple' && (
+                                        <div>
+                                            <label className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5 block">Teachers</label>
+                                            <select
+                                                multiple
+                                                className="w-full rounded-xl border border-slate-200 bg-white/50 px-4 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-800 min-h-[150px]"
+                                                value={newNotification.recipient_ids}
+                                                onChange={(e) => {
+                                                    const selected = Array.from(e.target.selectedOptions).map((opt) => opt.value);
+                                                    setNewNotification({ ...newNotification, recipient_ids: selected });
+                                                }}
+                                            >
+                                                {teachers.map((t: any) => (
+                                                    <option key={`notify-teacher-${t.id}`} value={String(t.id)}>{t.name}</option>
+                                                ))}
+                                            </select>
+                                            <p className="text-xs text-slate-500 mt-1">Hold Ctrl (Windows) or Cmd (Mac) to select multiple.</p>
+                                        </div>
+                                    )}
+
+                                    {newNotification.teacher_target_mode === 'all' && (
+                                        <p className="text-xs text-slate-500">
+                                            This notification will be sent to all teachers in the school.
+                                        </p>
+                                    )}
                                 </div>
                             )}
 
@@ -3359,6 +3879,16 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
                                 value={newNotification.scheduled_at}
                                 onChange={(e) => setNewNotification({ ...newNotification, scheduled_at: e.target.value })}
                             />
+
+                            <div>
+                                <label className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5 block">Template Variables (JSON Optional)</label>
+                                <textarea
+                                    className="w-full rounded-xl border border-slate-200 bg-white/50 px-4 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-800 min-h-[96px]"
+                                    value={newNotification.metadata}
+                                    onChange={(e) => setNewNotification({ ...newNotification, metadata: e.target.value })}
+                                    placeholder='{"student_name":"Aarav","amount":"2500","due_date":"2026-03-10"}'
+                                />
+                            </div>
 
                             <div className="flex justify-end">
                                 <Button icon={Send} onClick={handleQueueNotification}>Queue Notification</Button>
@@ -3476,6 +4006,9 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
                                         <td className="py-3">
                                             <p className="font-medium">{n.title || 'Untitled'}</p>
                                             <p className="text-xs text-slate-500 line-clamp-2">{n.message}</p>
+                                            {n.error_message && (
+                                                <p className="text-xs text-red-500 mt-1 line-clamp-2">Error: {n.error_message}</p>
+                                            )}
                                         </td>
                                         <td className="py-3">{n.recipient_type}{n.recipient_id ? `#${n.recipient_id}` : ''}</td>
                                         <td className="py-3 uppercase text-xs">{n.channel}</td>

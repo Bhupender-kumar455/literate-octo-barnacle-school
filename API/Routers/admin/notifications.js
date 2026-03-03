@@ -22,6 +22,30 @@ const normalizeRecipientType = (recipientType) => {
   return ['school', 'student', 'teacher', 'admin'].includes(value) ? value : null;
 };
 
+const parseMetadataInput = (input) => {
+  if (input === undefined || input === null || input === '') return null;
+  if (typeof input === 'object' && !Array.isArray(input)) return input;
+  if (typeof input === 'string') {
+    const trimmed = input.trim();
+    if (!trimmed) return null;
+    const parsed = JSON.parse(trimmed);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('metadata must be a JSON object');
+    }
+    return parsed;
+  }
+  throw new Error('metadata must be a JSON object');
+};
+
+const renderTemplateText = (template, variables) =>
+  String(template || '').replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (_, key) => {
+    if (!variables || !Object.prototype.hasOwnProperty.call(variables, key)) {
+      return '';
+    }
+    const value = variables[key];
+    return value === undefined || value === null ? '' : String(value);
+  });
+
 router.get('/templates', async (req, res) => {
   try {
     const pool = await poolPromise;
@@ -115,8 +139,10 @@ router.get('/', async (req, res) => {
           provider_message_id,
           error_message,
           metadata,
+          template_id,
           entity_type,
           entity_id,
+          updated_at,
           created_at
         FROM notifications
         WHERE school_id = @school_id
@@ -134,6 +160,7 @@ router.post('/', audit('queue_notification', 'notification'), async (req, res) =
   const {
     recipient_type,
     recipient_id,
+    recipient_ids,
     channel,
     title,
     message,
@@ -145,9 +172,8 @@ router.post('/', audit('queue_notification', 'notification'), async (req, res) =
   } = req.body;
 
   const normalizedRecipientType = normalizeRecipientType(recipient_type || 'school');
-  const normalizedChannel = normalizeChannel(channel || 'in_app');
-  if (!normalizedRecipientType || !normalizedChannel || !message) {
-    return res.status(400).json({ message: 'recipient_type, channel, and message are required' });
+  if (!normalizedRecipientType) {
+    return res.status(400).json({ message: 'recipient_type must be one of school, student, teacher, admin' });
   }
 
   const recipientIdNum = recipient_id === undefined || recipient_id === null || recipient_id === ''
@@ -157,8 +183,77 @@ router.post('/', audit('queue_notification', 'notification'), async (req, res) =
     return res.status(400).json({ message: 'Invalid recipient_id' });
   }
 
+  const recipientIdsRaw = Array.isArray(recipient_ids)
+    ? recipient_ids
+    : (recipient_ids === undefined || recipient_ids === null || recipient_ids === '' ? [] : [recipient_ids]);
+  const parsedRecipientIds = recipientIdsRaw.map((value) => Number(value));
+  if (parsedRecipientIds.some((value) => !Number.isFinite(value))) {
+    return res.status(400).json({ message: 'Invalid recipient_ids' });
+  }
+  const recipientIdsNum = [...new Set(parsedRecipientIds)];
+
+  if (normalizedRecipientType === 'student' && recipientIdNum === null) {
+    return res.status(400).json({ message: 'recipient_id is required for student notifications' });
+  }
+  if (normalizedRecipientType !== 'teacher' && recipientIdsNum.length) {
+    return res.status(400).json({ message: 'recipient_ids is only supported for teacher notifications' });
+  }
+
+  const templateIdNum = template_id === undefined || template_id === null || template_id === ''
+    ? null
+    : Number(template_id);
+  if (templateIdNum !== null && !Number.isFinite(templateIdNum)) {
+    return res.status(400).json({ message: 'Invalid template_id' });
+  }
+
+  let metadataObj = null;
+  try {
+    metadataObj = parseMetadataInput(metadata);
+  } catch (err) {
+    return res.status(400).json({ message: err.message });
+  }
+
   try {
     const pool = await poolPromise;
+    let template = null;
+    if (templateIdNum !== null) {
+      const templateResult = await pool.request()
+        .input('id', sql.BigInt, templateIdNum)
+        .input('school_id', sql.BigInt, req.user.school_id)
+        .query(`
+          SELECT id, channel, title_template, message_template, is_active
+          FROM notification_templates
+          WHERE id = @id AND school_id = @school_id
+        `);
+      if (!templateResult.recordset.length) {
+        return res.status(400).json({ message: 'Template not found for this school' });
+      }
+      template = templateResult.recordset[0];
+      if (!template.is_active) {
+        return res.status(400).json({ message: 'Template is inactive' });
+      }
+    }
+
+    const normalizedChannel = normalizeChannel(channel || template?.channel || 'in_app');
+    if (!normalizedChannel) {
+      return res.status(400).json({ message: 'Invalid channel' });
+    }
+    if (template && channel && normalizeChannel(channel) !== template.channel) {
+      return res.status(400).json({ message: 'channel must match selected template channel' });
+    }
+
+    const renderedTitle = template
+      ? renderTemplateText(template.title_template, metadataObj || {})
+      : null;
+    const renderedMessage = template
+      ? renderTemplateText(template.message_template, metadataObj || {})
+      : '';
+
+    const finalTitle = title || renderedTitle || null;
+    const finalMessage = message || renderedMessage;
+    if (!finalMessage || !String(finalMessage).trim()) {
+      return res.status(400).json({ message: 'message is required (or provide template_id with a valid message_template)' });
+    }
 
     if (normalizedRecipientType === 'student' && recipientIdNum !== null) {
       const student = await pool.request()
@@ -170,38 +265,108 @@ router.post('/', audit('queue_notification', 'notification'), async (req, res) =
       }
     }
 
-    if (normalizedRecipientType === 'teacher' && recipientIdNum !== null) {
-      const teacher = await pool.request()
-        .input('teacher_id', sql.BigInt, recipientIdNum)
-        .input('school_id', sql.BigInt, req.user.school_id)
-        .query('SELECT id FROM teachers WHERE id = @teacher_id AND school_id = @school_id');
-      if (!teacher.recordset.length) {
-        return res.status(400).json({ message: 'Invalid teacher recipient for this school' });
+    let teacherTargetIds = [];
+    if (normalizedRecipientType === 'teacher') {
+      teacherTargetIds = recipientIdsNum.length
+        ? recipientIdsNum
+        : (recipientIdNum !== null ? [recipientIdNum] : []);
+
+      if (teacherTargetIds.length) {
+        const teacherRequest = pool.request()
+          .input('school_id', sql.BigInt, req.user.school_id);
+        const placeholders = teacherTargetIds.map((_, idx) => {
+          const key = `teacher_id_${idx}`;
+          teacherRequest.input(key, sql.BigInt, teacherTargetIds[idx]);
+          return `@${key}`;
+        });
+
+        const teacherResult = await teacherRequest.query(`
+          SELECT id
+          FROM teachers
+          WHERE school_id = @school_id
+            AND id IN (${placeholders.join(', ')})
+        `);
+
+        const found = new Set(teacherResult.recordset.map((row) => Number(row.id)));
+        const missing = teacherTargetIds.filter((id) => !found.has(Number(id)));
+        if (missing.length) {
+          return res.status(400).json({ message: `Invalid teacher recipient(s) for this school: ${missing.join(', ')}` });
+        }
+      } else {
+        const teacherCount = await pool.request()
+          .input('school_id', sql.BigInt, req.user.school_id)
+          .query('SELECT COUNT(1) AS total FROM teachers WHERE school_id = @school_id');
+        const totalTeachers = Number(teacherCount.recordset[0]?.total || 0);
+        if (!totalTeachers) {
+          return res.status(400).json({ message: 'No teachers found in this school' });
+        }
       }
     }
 
-    const result = await pool.request()
-      .input('school_id', sql.BigInt, req.user.school_id)
-      .input('recipient_type', sql.VarChar(20), normalizedRecipientType)
-      .input('recipient_id', sql.BigInt, recipientIdNum)
-      .input('channel', sql.VarChar(20), normalizedChannel)
-      .input('title', sql.NVarChar(255), title || null)
-      .input('message', sql.NVarChar(sql.MAX), String(message))
-      .input('scheduled_at', sql.DateTime, scheduled_at || null)
-      .input('metadata', sql.NVarChar(sql.MAX), metadata ? JSON.stringify(metadata) : null)
-      .input('template_id', sql.BigInt, template_id || null)
-      .input('entity_type', sql.VarChar(50), entity_type || null)
-      .input('entity_id', sql.BigInt, entity_id || null)
-      .input('created_by', sql.BigInt, req.user.id)
-      .query(`
-        INSERT INTO notifications
-        (school_id, recipient_type, recipient_id, channel, title, message, status, scheduled_at, metadata, template_id, entity_type, entity_id, created_by)
-        OUTPUT INSERTED.id
-        VALUES
-        (@school_id, @recipient_type, @recipient_id, @channel, @title, @message, 'queued', @scheduled_at, @metadata, @template_id, @entity_type, @entity_id, @created_by)
-      `);
+    if (normalizedRecipientType === 'admin' && recipientIdNum !== null) {
+      const admin = await pool.request()
+        .input('user_id', sql.BigInt, recipientIdNum)
+        .input('school_id', sql.BigInt, req.user.school_id)
+        .query(`
+          SELECT u.id
+          FROM admins a
+          JOIN users u ON u.id = a.user_id
+          WHERE u.id = @user_id AND a.school_id = @school_id
+        `);
+      if (!admin.recordset.length) {
+        return res.status(400).json({ message: 'Invalid admin recipient for this school' });
+      }
+    }
 
-    res.status(201).json({ id: result.recordset[0].id, message: 'Notification queued' });
+    const insertNotification = async (targetRecipientId) => {
+      const insertResult = await pool.request()
+        .input('school_id', sql.BigInt, req.user.school_id)
+        .input('recipient_type', sql.VarChar(20), normalizedRecipientType)
+        .input('recipient_id', sql.BigInt, targetRecipientId)
+        .input('channel', sql.VarChar(20), normalizedChannel)
+        .input('title', sql.NVarChar(255), finalTitle)
+        .input('message', sql.NVarChar(sql.MAX), String(finalMessage))
+        .input('scheduled_at', sql.DateTime, scheduled_at || null)
+        .input('metadata', sql.NVarChar(sql.MAX), metadataObj ? JSON.stringify(metadataObj) : null)
+        .input('template_id', sql.BigInt, templateIdNum)
+        .input('entity_type', sql.VarChar(50), entity_type || null)
+        .input('entity_id', sql.BigInt, entity_id || null)
+        .input('created_by', sql.BigInt, req.user.id)
+        .query(`
+          INSERT INTO notifications
+          (school_id, recipient_type, recipient_id, channel, title, message, status, scheduled_at, metadata, template_id, entity_type, entity_id, created_by)
+          OUTPUT INSERTED.id
+          VALUES
+          (@school_id, @recipient_type, @recipient_id, @channel, @title, @message, 'queued', @scheduled_at, @metadata, @template_id, @entity_type, @entity_id, @created_by)
+        `);
+      return insertResult.recordset[0]?.id || null;
+    };
+
+    const queuedIds = [];
+    if (normalizedRecipientType === 'teacher') {
+      if (teacherTargetIds.length) {
+        for (const teacherId of teacherTargetIds) {
+          const id = await insertNotification(teacherId);
+          if (id !== null) queuedIds.push(id);
+        }
+      } else {
+        const id = await insertNotification(null);
+        if (id !== null) queuedIds.push(id);
+      }
+    } else {
+      const id = await insertNotification(recipientIdNum);
+      if (id !== null) queuedIds.push(id);
+    }
+
+    if (!queuedIds.length) {
+      return res.status(500).json({ message: 'Failed to queue notification' });
+    }
+
+    if (queuedIds.length === 1) {
+      return res.status(201).json({ id: queuedIds[0], queued: 1, message: 'Notification queued' });
+    }
+
+    res.status(201).json({ ids: queuedIds, queued: queuedIds.length, message: 'Notifications queued' });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

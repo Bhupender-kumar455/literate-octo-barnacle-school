@@ -121,6 +121,7 @@ export interface NotificationItem {
   title?: string;
   message: string;
   status: "queued" | "sent" | "failed" | "cancelled" | "read" | string;
+  template_id?: string | number | null;
   scheduled_at?: string | null;
   sent_at?: string | null;
   read_at?: string | null;
@@ -128,7 +129,10 @@ export interface NotificationItem {
   last_attempt_at?: string | null;
   next_retry_at?: string | null;
   provider_message_id?: string | null;
+  error_message?: string | null;
+  metadata?: string | null;
   created_at?: string;
+  updated_at?: string;
 }
 
 export interface ReportCardSubject {
