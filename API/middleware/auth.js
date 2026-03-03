@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { JWT_SECRET } = require('../config/env');
 
 const protect = async (req, res, next) => {
     let token;
@@ -9,7 +10,7 @@ const protect = async (req, res, next) => {
     if (!token) return res.status(401).json({ message: "No token, access denied" });
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const decoded = jwt.verify(token, JWT_SECRET);
         req.user = decoded; // contains id, role, school_id
         next();
     } catch (err) {

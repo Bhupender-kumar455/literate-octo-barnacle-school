@@ -1,39 +1,38 @@
 import React, { useState } from "react";
 import { UserRole } from "../types";
-import { Button, Card, Input, Badge } from "./UIComponents";
+import { Button, Badge } from "./UIComponents";
 import {
   Shield,
   User,
   GraduationCap,
+  BookOpen,
   Lock,
   Mail,
   ArrowRight,
+  Sun,
+  Moon,
 } from "lucide-react";
 
 interface LoginProps {
   onLogin: (role: UserRole, email: string, password: string) => void;
+  isDark?: boolean;
+  toggleTheme?: () => void;
 }
 
-const Login: React.FC<LoginProps> = ({ onLogin }) => {
+const Login: React.FC<LoginProps> = ({ onLogin, isDark, toggleTheme }) => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [selectedRole, setSelectedRole] = useState<UserRole | null>(null);
 
-  // In Login.tsx → Update handleLogin
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (selectedRole && email && password) {
-      onLogin(selectedRole, email, password); // ← Now passing password too
+      onLogin(selectedRole, email, password);
     }
   };
 
-  // Pre-fill email for demo purposes based on role
   const selectRole = (role: UserRole) => {
     setSelectedRole(role);
-    if (role === UserRole.SUPER_ADMIN) setEmail("super@systema.com");
-    if (role === UserRole.ADMIN) setEmail("admin@hogwarts.edu");
-    if (role === UserRole.TEACHER) setEmail("teacher@hogwarts.edu");
-    setPassword("password123");
   };
 
   return (
@@ -62,7 +61,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 <Shield size={20} />
               </div>
               <div>
-                <p className="font-medium text-white">Secure & Scalable</p>
+                <p className="font-medium text-white">Secure and Scalable</p>
                 <p className="text-sm opacity-70">Enterprise grade security</p>
               </div>
             </div>
@@ -79,7 +78,17 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
         </div>
 
         {/* Right: Login Form */}
-        <div className="w-full md:w-1/2 p-8 md:p-12 bg-white dark:bg-slate-950 flex flex-col justify-center">
+        <div className="w-full md:w-1/2 p-8 md:p-12 bg-white dark:bg-slate-950 flex flex-col justify-center relative">
+          {toggleTheme && (
+            <button
+              onClick={toggleTheme}
+              className="absolute right-6 top-6 p-2 rounded-full text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+              title={isDark ? "Switch to Light Mode" : "Switch to Dark Mode"}
+            >
+              {isDark ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
+          )}
+
           <div className="mb-8 text-center md:text-left">
             <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-2">
               Welcome back
@@ -103,7 +112,7 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                     Super Admin
                   </h3>
                   <p className="text-sm text-slate-500">
-                    System owners & management
+                    System owners and management
                   </p>
                 </div>
               </button>
@@ -137,6 +146,21 @@ const Login: React.FC<LoginProps> = ({ onLogin }) => {
                     Teacher
                   </h3>
                   <p className="text-sm text-slate-500">Classroom management</p>
+                </div>
+              </button>
+
+              <button
+                onClick={() => selectRole(UserRole.STUDENT)}
+                className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-amber-500 dark:hover:border-amber-500 hover:bg-amber-50 dark:hover:bg-amber-900/20 transition-all flex items-center gap-4 group text-left"
+              >
+                <div className="p-3 rounded-full bg-amber-100 text-amber-600 dark:bg-amber-900/30 group-hover:scale-110 transition-transform">
+                  <BookOpen size={24} />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-slate-900 dark:text-white">
+                    Student
+                  </h3>
+                  <p className="text-sm text-slate-500">Personal learning portal</p>
                 </div>
               </button>
             </div>
