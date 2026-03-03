@@ -141,7 +141,7 @@ const App: React.FC = () => {
           <SuperAdminView currentView={currentView} />
         )}
         {user.role === UserRole.ADMIN && (
-          <AdminView currentView={currentView} user={user} />
+          <AdminView currentView={currentView} user={user} onChangeView={setCurrentView} />
         )}
         {user.role === UserRole.TEACHER && (
           <TeacherView currentView={currentView} user={user} />

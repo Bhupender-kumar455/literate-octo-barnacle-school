@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { API_BASE_URL, getAdminStats, getTeachers, getClasses, createClass, getStudents, getAnnouncements, getFeesStats, getInvoices, getReportDownloads, logReportDownload, getAttendanceReport, getFeeReport, getAcademicReport, downloadAttendanceCsv, downloadFeeCsv, downloadAcademicCsv, downloadStudentsCsv, downloadInvoicesCsv, downloadStudentsPdf, downloadInvoicesPdf, downloadAttendancePdf, downloadFeePdf, downloadAcademicPdf, getGrades, createGrade, createStudent, createAnnouncement, createInvoice, updateInvoiceStatus, getSubjects, createSubject, getClassSubjects, createClassSubject, getScheduleEntries, createScheduleEntry, deleteScheduleEntry, updateTeacher, deleteTeacher, updateStudent, getStudentReportCardTerms, getStudentReportCard, downloadStudentReportCardPdf, getNotificationTemplates, createNotificationTemplate, getNotifications, queueNotification, triggerFeeDueNotifications, updateNotificationStatus, runNotificationDispatchNow, getAdminLeaves, updateAdminLeaveStatus } from '../services/api';
+import { API_BASE_URL, getAdminStats, getTeachers, getClasses, createClass, getStudents, getAnnouncements, getFeesStats, getInvoices, getReportDownloads, logReportDownload, getAttendanceReport, getAttendanceDetailedReport, getFeeReport, getAcademicReport, downloadAttendanceCsv, downloadFeeCsv, downloadAcademicCsv, downloadStudentsCsv, downloadInvoicesCsv, downloadStudentsPdf, downloadInvoicesPdf, downloadAttendancePdf, downloadFeePdf, downloadAcademicPdf, getGrades, createGrade, createStudent, createAnnouncement, createInvoice, updateInvoiceStatus, getSubjects, createSubject, getClassSubjects, createClassSubject, getScheduleEntries, createScheduleEntry, deleteScheduleEntry, updateTeacher, deleteTeacher, updateStudent, getStudentReportCardTerms, getStudentReportCard, downloadStudentReportCardPdf, getNotificationTemplates, createNotificationTemplate, getNotifications, queueNotification, triggerFeeDueNotifications, updateNotificationStatus, runNotificationDispatchNow, getAdminLeaves, updateAdminLeaveStatus } from '../services/api';
 import { Card, Button, StatCard, Badge, Input } from './UIComponents';
 import {
     Users,
@@ -66,7 +66,7 @@ const createDefaultClassSetup = () => ({
     room: '',
 });
 
-const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView, user }) => {
+const AdminView: React.FC<{ currentView: string; user: User; onChangeView?: (view: string) => void }> = ({ currentView, user, onChangeView }) => {
     const [stats, setStats] = useState({
         totalStudents: 0,
         totalTeachers: 0,
@@ -118,9 +118,11 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
     const [feesStats, setFeesStats] = useState<{ total_students: number; collected: number; pending: number } | null>(null);
     const [attendanceData, setAttendanceData] = useState<any[]>(emptyAttendanceData);
     const [attendanceRows, setAttendanceRows] = useState<any[]>([]);
+    const [attendanceDetailedRows, setAttendanceDetailedRows] = useState<any[]>([]);
     const [attendanceFrom, setAttendanceFrom] = useState('');
     const [attendanceTo, setAttendanceTo] = useState('');
     const [isAttendanceLoading, setIsAttendanceLoading] = useState(false);
+    const [attendanceDetailedError, setAttendanceDetailedError] = useState('');
     const [newClass, setNewClass] = useState({
         grade: '',
         section: '',
@@ -308,6 +310,38 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
         return `${subjectToken}-${schoolToken}-${digits}`.slice(0, 20);
     };
 
+    const openQuickActionView = (view: string) => {
+        if (typeof onChangeView === 'function') {
+            onChangeView(view);
+        }
+    };
+
+    const handleQuickAction = (action: 'addStudent' | 'addTeacher' | 'newClass' | 'createInvoice') => {
+        if (action === 'addStudent') {
+            fetchClasses();
+            setShowAddStudentModal(true);
+            openQuickActionView('students');
+            return;
+        }
+
+        if (action === 'addTeacher') {
+            setShowAddTeacherModal(true);
+            openQuickActionView('teachers');
+            return;
+        }
+
+        if (action === 'newClass') {
+            fetchTeachers();
+            setShowCreateClassModal(true);
+            openQuickActionView('classes');
+            return;
+        }
+
+        fetchStudents();
+        setShowInvoiceModal(true);
+        openQuickActionView('fees');
+    };
+
     // fetch teacher method 
     const fetchTeachers = async () => {
         try {
@@ -416,25 +450,84 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
 
     const fetchAttendanceChart = async (from?: string, to?: string) => {
         setIsAttendanceLoading(true);
+        setAttendanceDetailedError('');
         try {
-            const data = await getAttendanceReport(from, to);
-            const rows = Array.isArray(data) ? data : [];
-            setAttendanceRows(rows);
-            const getChartLabel = (value: any) => {
+            const normalizeDateKey = (value: any) => {
+                if (!value) return '';
+                if (typeof value === 'string') return value.slice(0, 10);
                 const dt = new Date(value);
-                if (Number.isNaN(dt.getTime())) return String(value || '').slice(0, 10);
-                return `${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+                if (Number.isNaN(dt.getTime())) return String(value).slice(0, 10);
+                return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
             };
+
+            const summarizeDetailedByDate = (rows: any[]) => {
+                const grouped = new Map<string, { date: string; present: number; absent: number; late: number; half_day: number }>();
+                rows.forEach((row: any) => {
+                    const key = normalizeDateKey(row?.date);
+                    if (!key) return;
+                    const prev = grouped.get(key) || { date: key, present: 0, absent: 0, late: 0, half_day: 0 };
+                    prev.present += Number(row?.present || 0);
+                    prev.absent += Number(row?.absent || 0);
+                    prev.late += Number(row?.late || 0);
+                    prev.half_day += Number(row?.half_day || 0);
+                    grouped.set(key, prev);
+                });
+                return Array.from(grouped.values()).sort((a, b) => String(b.date).localeCompare(String(a.date)));
+            };
+
+            const [summaryResult, detailedResult] = await Promise.allSettled([
+                getAttendanceReport(from, to),
+                getAttendanceDetailedReport(from, to),
+            ]);
+
+            if (summaryResult.status === 'rejected') {
+                console.error("Error fetching attendance summary:", summaryResult.reason);
+            }
+            if (detailedResult.status === 'rejected') {
+                console.error("Error fetching detailed attendance:", detailedResult.reason);
+                const statusCode = Number(detailedResult.reason?.response?.status || 0);
+                const message = statusCode === 404
+                    ? "Class-wise attendance API is unavailable (404). Restart backend server and try again."
+                    : "Failed to load class-wise attendance data.";
+                setAttendanceDetailedError(message);
+                if (currentView === 'attendance') {
+                    toast.error(message);
+                }
+            }
+
+            let rows = summaryResult.status === 'fulfilled' && Array.isArray(summaryResult.value)
+                ? summaryResult.value
+                : [];
+            const detailedRows = detailedResult.status === 'fulfilled' && Array.isArray(detailedResult.value)
+                ? detailedResult.value
+                : [];
+
+            if (!rows.length && detailedRows.length) {
+                rows = summarizeDetailedByDate(detailedRows);
+            }
+
+            setAttendanceRows(rows);
+            setAttendanceDetailedRows(detailedRows);
+
+            const getChartLabel = (value: any) => {
+                const key = normalizeDateKey(value);
+                if (!key) return '-';
+                const [, month = '', day = ''] = key.split('-');
+                return `${month}-${day}`;
+            };
+
             const mapped = rows.slice(0, 7).reverse().map((row: any) => ({
                 name: getChartLabel(row.date),
-                present: row.present || 0,
-                absent: row.absent || 0,
-                late: row.late || 0,
+                present: Number(row?.present || 0),
+                absent: Number(row?.absent || 0),
+                late: Number(row?.late || 0),
+                half_day: Number(row?.half_day || 0),
             }));
             setAttendanceData(mapped);
         } catch (error) {
             console.error("Error fetching attendance chart:", error);
             setAttendanceRows([]);
+            setAttendanceDetailedRows([]);
             setAttendanceData([]);
             if (currentView === 'attendance') {
                 toast.error("Failed to load attendance data");
@@ -3128,21 +3221,28 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
 
     if (currentView === 'attendance') {
         const totals = attendanceRows.reduce(
-            (acc: { present: number; absent: number; late: number }, row: any) => ({
+            (acc: { present: number; absent: number; late: number; halfDay: number }, row: any) => ({
                 present: acc.present + Number(row?.present || 0),
                 absent: acc.absent + Number(row?.absent || 0),
                 late: acc.late + Number(row?.late || 0),
+                halfDay: acc.halfDay + Number(row?.half_day || row?.halfDay || 0),
             }),
-            { present: 0, absent: 0, late: 0 }
+            { present: 0, absent: 0, late: 0, halfDay: 0 }
         );
-        const totalMarked = totals.present + totals.absent + totals.late;
-        const avgAttendance = totalMarked ? Math.round((totals.present / totalMarked) * 100) : 0;
+        const totalMarked = totals.present + totals.absent + totals.late + totals.halfDay;
+        const attendedCount = totals.present + totals.late + totals.halfDay;
+        const avgAttendance = totalMarked ? Math.round((attendedCount / totalMarked) * 100) : 0;
         const latestRow = attendanceRows[0] || null;
         const latestAbsent = Number(latestRow?.absent || 0);
         const formatDateLabel = (value: string) => {
             const dt = new Date(value);
             if (Number.isNaN(dt.getTime())) return String(value || '-');
             return dt.toLocaleDateString();
+        };
+        const formatDateTimeLabel = (value: string) => {
+            const dt = new Date(value);
+            if (Number.isNaN(dt.getTime())) return '-';
+            return dt.toLocaleString();
         };
 
         return (
@@ -3186,7 +3286,7 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
                             icon={Download}
                             onClick={async () => {
                                 try {
-                                    const blob = await downloadAttendancePdf();
+                                    const blob = await downloadAttendancePdf(attendanceFrom || undefined, attendanceTo || undefined);
                                     downloadBlob(blob, 'attendance-summary.pdf');
                                 } catch (err) {
                                     toast.error("Failed to download PDF");
@@ -3215,6 +3315,7 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
                                         <Bar dataKey="present" name="Present" fill="#6366f1" radius={[4, 4, 0, 0]} />
                                         <Bar dataKey="absent" name="Absent" fill="#cbd5e1" radius={[4, 4, 0, 0]} />
                                         <Bar dataKey="late" name="Late" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                                        <Bar dataKey="half_day" name="Half Day" fill="#10b981" radius={[4, 4, 0, 0]} />
                                     </BarChart>
                                 </ResponsiveContainer>
                             </div>
@@ -3246,8 +3347,8 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
 
                 <Card>
                     <div className="flex justify-between items-center mb-4">
-                        <h3 className="font-bold">Attendance by Date</h3>
-                        <Badge variant="outline">{attendanceRows.length} rows</Badge>
+                        <h3 className="font-bold">Class-wise Attendance Submissions</h3>
+                        <Badge variant="outline">{attendanceDetailedRows.length} rows</Badge>
                     </div>
                     {isAttendanceLoading ? (
                         <p className="text-sm text-slate-500">Loading attendance data...</p>
@@ -3256,39 +3357,52 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
                             <thead>
                                 <tr className="text-left text-slate-500 border-b border-slate-100 dark:border-slate-800">
                                     <th className="pb-3 font-medium">Date</th>
+                                    <th className="pb-3 font-medium">Class</th>
+                                    <th className="pb-3 font-medium">Subject</th>
+                                    <th className="pb-3 font-medium">Teacher</th>
                                     <th className="pb-3 font-medium">Present</th>
                                     <th className="pb-3 font-medium">Absent</th>
                                     <th className="pb-3 font-medium">Late</th>
-                                    <th className="pb-3 font-medium">Attendance %</th>
+                                    <th className="pb-3 font-medium">Half Day</th>
+                                    <th className="pb-3 font-medium">Total</th>
+                                    <th className="pb-3 font-medium">Last Updated</th>
                                     <th className="pb-3 font-medium">Status</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                {attendanceRows.map((row: any) => {
+                                {attendanceDetailedRows.map((row: any) => {
                                     const present = Number(row?.present || 0);
                                     const absent = Number(row?.absent || 0);
                                     const late = Number(row?.late || 0);
-                                    const dayTotal = present + absent + late;
-                                    const dayAttendance = dayTotal ? Math.round((present / dayTotal) * 100) : 0;
+                                    const halfDay = Number(row?.half_day || 0);
+                                    const total = Number(row?.total || (present + absent + late + halfDay));
+                                    const classLabel = row?.grade && row?.section ? `${row.grade}-${row.section}` : '-';
+                                    const subjectLabel = row?.subject || '-';
+                                    const teacherLabel = row?.teacher_name || '-';
                                     return (
-                                        <tr key={`attendance-day-${row.date}`}>
+                                        <tr key={`attendance-row-${row.date}-${classLabel}-${subjectLabel}-${teacherLabel}`}>
                                             <td className="py-3 font-medium">{formatDateLabel(row.date)}</td>
+                                            <td className="py-3">{classLabel}</td>
+                                            <td className="py-3">{subjectLabel}</td>
+                                            <td className="py-3">{teacherLabel}</td>
                                             <td className="py-3">{present}</td>
                                             <td className="py-3">{absent}</td>
                                             <td className="py-3">{late}</td>
-                                            <td className="py-3">{dayAttendance}%</td>
+                                            <td className="py-3">{halfDay}</td>
+                                            <td className="py-3">{total}</td>
+                                            <td className="py-3">{formatDateTimeLabel(row?.last_marked_at)}</td>
                                             <td className="py-3">
-                                                <Badge variant={dayAttendance >= 90 ? 'success' : dayAttendance >= 75 ? 'warning' : 'danger'}>
-                                                    {dayAttendance >= 90 ? 'Excellent' : dayAttendance >= 75 ? 'Needs Attention' : 'Critical'}
+                                                <Badge variant={total > 0 ? 'success' : 'warning'}>
+                                                    {total > 0 ? 'Submitted' : 'Pending'}
                                                 </Badge>
                                             </td>
                                         </tr>
                                     );
                                 })}
-                                {attendanceRows.length === 0 && (
+                                {attendanceDetailedRows.length === 0 && (
                                     <tr>
-                                        <td colSpan={6} className="py-4 text-slate-500 text-center">
-                                            No attendance data found for selected dates.
+                                        <td colSpan={11} className="py-4 text-slate-500 text-center">
+                                            {attendanceDetailedError || 'No attendance data found for selected dates.'}
                                         </td>
                                     </tr>
                                 )}
@@ -4183,16 +4297,16 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
                     <Card>
                         <h3 className="text-lg font-bold mb-4">Quick Actions</h3>
                         <div className="grid grid-cols-2 gap-3">
-                            <Button variant="outline" size="sm" className="h-auto py-3 flex-col gap-2" icon={Plus}>
+                            <Button variant="outline" size="sm" className="h-auto py-3 flex-col gap-2" icon={Plus} onClick={() => handleQuickAction('addStudent')}>
                                 <span>Add Student</span>
                             </Button>
-                            <Button variant="outline" size="sm" className="h-auto py-3 flex-col gap-2" icon={GraduationCap}>
+                            <Button variant="outline" size="sm" className="h-auto py-3 flex-col gap-2" icon={GraduationCap} onClick={() => handleQuickAction('addTeacher')}>
                                 <span>Add Teacher</span>
                             </Button>
-                            <Button variant="outline" size="sm" className="h-auto py-3 flex-col gap-2" icon={BookOpen}>
+                            <Button variant="outline" size="sm" className="h-auto py-3 flex-col gap-2" icon={BookOpen} onClick={() => handleQuickAction('newClass')}>
                                 <span>New Class</span>
                             </Button>
-                            <Button variant="outline" size="sm" className="h-auto py-3 flex-col gap-2" icon={DollarSign}>
+                            <Button variant="outline" size="sm" className="h-auto py-3 flex-col gap-2" icon={DollarSign} onClick={() => handleQuickAction('createInvoice')}>
                                 <span>Create Invoice</span>
                             </Button>
                         </div>
@@ -4201,7 +4315,12 @@ const AdminView: React.FC<{ currentView: string; user: User }> = ({ currentView,
                     <Card>
                         <div className="flex justify-between items-center mb-4">
                             <h3 className="text-lg font-bold">Announcements</h3>
-                            <button className="text-indigo-600 text-sm font-medium hover:underline">View All</button>
+                            <button
+                                className="text-indigo-600 text-sm font-medium hover:underline"
+                                onClick={() => openQuickActionView('announcements')}
+                            >
+                                View All
+                            </button>
                         </div>
                         <div className="space-y-4">
                             {announcements.map(ann => (

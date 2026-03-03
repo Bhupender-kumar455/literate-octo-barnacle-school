@@ -29,7 +29,8 @@ router.get('/attendance-summary', async (req, res) => {
           CAST(a.[date] AS DATE) AS date,
           SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END) AS present,
           SUM(CASE WHEN a.status = 'absent' THEN 1 ELSE 0 END) AS absent,
-          SUM(CASE WHEN a.status = 'late' THEN 1 ELSE 0 END) AS late
+          SUM(CASE WHEN a.status = 'late' THEN 1 ELSE 0 END) AS late,
+          SUM(CASE WHEN a.status = 'half_day' THEN 1 ELSE 0 END) AS half_day
         FROM attendance a
         JOIN students s ON a.student_id = s.id
         WHERE s.school_id = @school_id
@@ -37,6 +38,51 @@ router.get('/attendance-summary', async (req, res) => {
           AND (@to IS NULL OR a.[date] <= @to)
         GROUP BY CAST(a.[date] AS DATE)
         ORDER BY date DESC
+      `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.get('/attendance-detailed', async (req, res) => {
+  const { from, to } = req.query;
+  try {
+    const pool = await poolPromise;
+    const result = await pool.request()
+      .input('school_id', sql.Int, req.user.school_id)
+      .input('from', sql.Date, from || null)
+      .input('to', sql.Date, to || null)
+      .query(`
+        SELECT
+          CAST(a.[date] AS DATE) AS date,
+          c.grade,
+          c.section,
+          subj.name AS subject,
+          u.name AS teacher_name,
+          SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END) AS present,
+          SUM(CASE WHEN a.status = 'absent' THEN 1 ELSE 0 END) AS absent,
+          SUM(CASE WHEN a.status = 'late' THEN 1 ELSE 0 END) AS late,
+          SUM(CASE WHEN a.status = 'half_day' THEN 1 ELSE 0 END) AS half_day,
+          COUNT(*) AS total,
+          MAX(a.marked_at) AS last_marked_at
+        FROM attendance a
+        JOIN students s ON a.student_id = s.id
+        LEFT JOIN class_subjects cs ON a.class_subject_id = cs.id
+        LEFT JOIN classes c ON c.id = COALESCE(cs.class_id, s.class_id)
+        LEFT JOIN subjects subj ON subj.id = cs.subject_id
+        LEFT JOIN teachers t ON t.id = a.marked_by
+        LEFT JOIN users u ON u.id = COALESCE(t.user_id, a.marked_by)
+        WHERE s.school_id = @school_id
+          AND (@from IS NULL OR a.[date] >= @from)
+          AND (@to IS NULL OR a.[date] <= @to)
+        GROUP BY
+          CAST(a.[date] AS DATE),
+          c.grade,
+          c.section,
+          subj.name,
+          u.name
+        ORDER BY date DESC, c.grade, c.section, u.name
       `);
     res.json(result.recordset);
   } catch (err) {
@@ -57,7 +103,8 @@ router.get('/attendance-summary.csv', async (req, res) => {
           CAST(a.[date] AS DATE) AS date,
           SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END) AS present,
           SUM(CASE WHEN a.status = 'absent' THEN 1 ELSE 0 END) AS absent,
-          SUM(CASE WHEN a.status = 'late' THEN 1 ELSE 0 END) AS late
+          SUM(CASE WHEN a.status = 'late' THEN 1 ELSE 0 END) AS late,
+          SUM(CASE WHEN a.status = 'half_day' THEN 1 ELSE 0 END) AS half_day
         FROM attendance a
         JOIN students s ON a.student_id = s.id
         WHERE s.school_id = @school_id
@@ -68,9 +115,9 @@ router.get('/attendance-summary.csv', async (req, res) => {
       `);
 
     const rows = result.recordset || [];
-    const header = 'date,present,absent,late';
+    const header = 'date,present,absent,late,half_day';
     const body = rows.map(r =>
-      [r.date, r.present, r.absent, r.late].map(csvEscape).join(',')
+      [r.date, r.present, r.absent, r.late, r.half_day].map(csvEscape).join(',')
     ).join('\n');
     const csv = `${header}\n${body}`;
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -94,7 +141,8 @@ router.get('/attendance-summary.pdf', async (req, res) => {
           CAST(a.[date] AS DATE) AS date,
           SUM(CASE WHEN a.status = 'present' THEN 1 ELSE 0 END) AS present,
           SUM(CASE WHEN a.status = 'absent' THEN 1 ELSE 0 END) AS absent,
-          SUM(CASE WHEN a.status = 'late' THEN 1 ELSE 0 END) AS late
+          SUM(CASE WHEN a.status = 'late' THEN 1 ELSE 0 END) AS late,
+          SUM(CASE WHEN a.status = 'half_day' THEN 1 ELSE 0 END) AS half_day
         FROM attendance a
         JOIN students s ON a.student_id = s.id
         WHERE s.school_id = @school_id
@@ -110,10 +158,10 @@ router.get('/attendance-summary.pdf', async (req, res) => {
     doc.pipe(res);
     doc.fontSize(16).text('Attendance Summary', { align: 'center' });
     doc.moveDown();
-    doc.fontSize(10).text('Date | Present | Absent | Late');
+    doc.fontSize(10).text('Date | Present | Absent | Late | Half Day');
     doc.moveDown(0.5);
     result.recordset.forEach(r => {
-      doc.text(`${r.date} | ${r.present} | ${r.absent} | ${r.late}`);
+      doc.text(`${r.date} | ${r.present} | ${r.absent} | ${r.late} | ${r.half_day}`);
     });
     doc.end();
   } catch (err) {

@@ -176,6 +176,11 @@ export const getAttendanceReport = async (from?: string, to?: string) => {
   return res.data;
 };
 
+export const getAttendanceDetailedReport = async (from?: string, to?: string) => {
+  const res = await api.get("/admin/reports/attendance-detailed", { params: { from, to } });
+  return res.data;
+};
+
 export const getFeeReport = async (from?: string, to?: string) => {
   const res = await api.get("/admin/reports/fee-collection", { params: { from, to } });
   return res.data;
@@ -355,8 +360,8 @@ export const downloadInvoicesPdf = async () => {
   return res.data;
 };
 
-export const downloadAttendancePdf = async () => {
-  const res = await api.get("/admin/reports/attendance-summary.pdf", { responseType: "blob" });
+export const downloadAttendancePdf = async (from?: string, to?: string) => {
+  const res = await api.get("/admin/reports/attendance-summary.pdf", { params: { from, to }, responseType: "blob" });
   return res.data;
 };
 
