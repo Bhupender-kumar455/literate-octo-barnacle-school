@@ -41,6 +41,18 @@ const Layout: React.FC<LayoutProps> = ({ user, children, onLogout, currentView, 
   const [notificationItems, setNotificationItems] = useState<any[]>([]);
   const [isNotificationLoading, setIsNotificationLoading] = useState(false);
   const [notificationError, setNotificationError] = useState('');
+  const hiddenNotificationStorageKey = `hidden_notifications_${user.role}_${user.id}`;
+  const readHiddenNotificationIds = () => {
+    try {
+      const raw = localStorage.getItem(hiddenNotificationStorageKey);
+      if (!raw) return [] as string[];
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed.map((id) => String(id)) : [];
+    } catch {
+      return [] as string[];
+    }
+  };
+  const [hiddenNotificationIds, setHiddenNotificationIds] = useState<string[]>(readHiddenNotificationIds);
   const canOpenNotifications = user.role === UserRole.ADMIN || user.role === UserRole.STUDENT || user.role === UserRole.TEACHER;
 
   const fetchBellNotifications = async () => {
@@ -49,14 +61,17 @@ const Layout: React.FC<LayoutProps> = ({ user, children, onLogout, currentView, 
     setNotificationError('');
     try {
       if (user.role === UserRole.ADMIN) {
-        const data = await getNotifications({ limit: 25 });
-        setNotificationItems(Array.isArray(data) ? data : []);
+        const data = await getNotifications({ limit: 25, include_future: false });
+        const normalized = Array.isArray(data) ? data : [];
+        setNotificationItems(normalized.filter((item) => !hiddenNotificationIds.includes(String(item.id))));
       } else if (user.role === UserRole.TEACHER) {
         const data = await getTeacherPortalNotifications(25);
-        setNotificationItems(Array.isArray(data) ? data : []);
+        const normalized = Array.isArray(data) ? data : [];
+        setNotificationItems(normalized.filter((item) => !hiddenNotificationIds.includes(String(item.id))));
       } else {
         const data = await getStudentPortalNotifications(25);
-        setNotificationItems(Array.isArray(data) ? data : []);
+        const normalized = Array.isArray(data) ? data : [];
+        setNotificationItems(normalized.filter((item) => !hiddenNotificationIds.includes(String(item.id))));
       }
     } catch (error) {
       setNotificationError('Failed to load notifications');
@@ -89,6 +104,20 @@ const Layout: React.FC<LayoutProps> = ({ user, children, onLogout, currentView, 
     } catch (error) {
       // Keep modal stable even if marking read fails.
     }
+  };
+
+  const handleDismissNotification = (id: number | string) => {
+    const idStr = String(id);
+    const nextHidden = hiddenNotificationIds.includes(idStr)
+      ? hiddenNotificationIds
+      : [...hiddenNotificationIds, idStr];
+    setHiddenNotificationIds(nextHidden);
+    try {
+      localStorage.setItem(hiddenNotificationStorageKey, JSON.stringify(nextHidden));
+    } catch {
+      // Ignore storage failures; dismissal still applies in current session state.
+    }
+    setNotificationItems((prev) => prev.filter((item) => String(item.id) !== idStr));
   };
 
   const getRoleBadge = () => {
@@ -232,6 +261,15 @@ const Layout: React.FC<LayoutProps> = ({ user, children, onLogout, currentView, 
                         >
                           Mark Read
                         </Button>
+                      )}
+                      {(item.status === 'read' || item.status === 'sent') && (
+                        <button
+                          onClick={() => handleDismissNotification(item.id)}
+                          className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 dark:hover:text-slate-200 transition-colors"
+                          title="Remove from panel"
+                        >
+                          <X size={14} />
+                        </button>
                       )}
                     </div>
                   </div>

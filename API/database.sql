@@ -108,6 +108,21 @@ BEGIN
     PRINT 'classes created';
 END
 
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'class_archives')
+BEGIN
+    CREATE TABLE class_archives (
+        id BIGINT IDENTITY PRIMARY KEY,
+        class_id BIGINT NOT NULL UNIQUE,
+        school_id BIGINT NOT NULL,
+        archived_by BIGINT NULL,
+        reason NVARCHAR(255) NULL,
+        archived_at DATETIME NOT NULL DEFAULT GETDATE(),
+        FOREIGN KEY (class_id) REFERENCES classes(id),
+        FOREIGN KEY (school_id) REFERENCES schools(id)
+    );
+    PRINT 'class_archives created';
+END
+
 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'subjects')
 BEGIN
     CREATE TABLE subjects (

@@ -149,6 +149,7 @@ router.get('/notifications', async (req, res) => {
             OR (recipient_type = 'student' AND recipient_id = @student_id)
           )
           AND status IN ('queued', 'sent', 'read')
+          AND (scheduled_at IS NULL OR scheduled_at <= GETDATE())
         ORDER BY created_at DESC
       `);
     res.json(result.recordset);
@@ -184,6 +185,7 @@ router.put('/notifications/:id/read', async (req, res) => {
             recipient_type = 'school'
             OR (recipient_type = 'student' AND recipient_id = @student_id)
           )
+          AND (scheduled_at IS NULL OR scheduled_at <= GETDATE())
       `);
 
     const affected = Array.isArray(result.rowsAffected) ? (result.rowsAffected[0] || 0) : 0;

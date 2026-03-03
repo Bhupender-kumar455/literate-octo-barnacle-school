@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { API_BASE_URL, getAdminStats, getTeachers, getClasses, createClass, getStudents, getAnnouncements, getFeesStats, getInvoices, getReportDownloads, logReportDownload, getAttendanceReport, getAttendanceDetailedReport, getFeeReport, getAcademicReport, downloadAttendanceCsv, downloadFeeCsv, downloadAcademicCsv, downloadStudentsCsv, downloadInvoicesCsv, downloadStudentsPdf, downloadInvoicesPdf, downloadAttendancePdf, downloadFeePdf, downloadAcademicPdf, getGrades, createGrade, createStudent, createAnnouncement, createInvoice, updateInvoiceStatus, getSubjects, createSubject, getClassSubjects, createClassSubject, getScheduleEntries, createScheduleEntry, deleteScheduleEntry, updateTeacher, deleteTeacher, updateStudent, getStudentReportCardTerms, getStudentReportCard, downloadStudentReportCardPdf, getNotificationTemplates, createNotificationTemplate, getNotifications, queueNotification, triggerFeeDueNotifications, updateNotificationStatus, runNotificationDispatchNow, getAdminLeaves, updateAdminLeaveStatus } from '../services/api';
+import { API_BASE_URL, getAdminStats, getTeachers, getClasses, createClass, archiveClass, deleteClass, getStudents, getAnnouncements, getFeesStats, getInvoices, getReportDownloads, logReportDownload, getAttendanceReport, getAttendanceDetailedReport, getFeeReport, getAcademicReport, downloadAttendanceCsv, downloadFeeCsv, downloadAcademicCsv, downloadStudentsCsv, downloadInvoicesCsv, downloadStudentsPdf, downloadInvoicesPdf, downloadAttendancePdf, downloadFeePdf, downloadAcademicPdf, getGrades, createGrade, createStudent, createAnnouncement, createInvoice, updateInvoiceStatus, updateInvoice, deleteInvoice, sendInvoiceReminder, getSubjects, createSubject, getClassSubjects, createClassSubject, getScheduleEntries, createScheduleEntry, deleteScheduleEntry, updateTeacher, deleteTeacher, updateStudent, getStudentReportCardTerms, getStudentReportCard, downloadStudentReportCardPdf, getNotificationTemplates, createNotificationTemplate, getNotifications, queueNotification, triggerFeeDueNotifications, updateNotificationStatus, runNotificationDispatchNow, getAdminLeaves, updateAdminLeaveStatus } from '../services/api';
 import { Card, Button, StatCard, Badge, Input } from './UIComponents';
 import {
     Users,
@@ -162,6 +162,20 @@ const AdminView: React.FC<{ currentView: string; user: User; onChangeView?: (vie
         student_id: '',
         amount: '',
         due_date: '',
+    });
+    const [invoiceStatusFilter, setInvoiceStatusFilter] = useState('all');
+    const [invoiceSearchTerm, setInvoiceSearchTerm] = useState('');
+    const [selectedInvoice, setSelectedInvoice] = useState<any | null>(null);
+    const [showInvoiceDetailsModal, setShowInvoiceDetailsModal] = useState(false);
+    const [showInvoiceEditModal, setShowInvoiceEditModal] = useState(false);
+    const [showInvoiceReminderModal, setShowInvoiceReminderModal] = useState(false);
+    const [invoiceReminderTarget, setInvoiceReminderTarget] = useState<any | null>(null);
+    const [invoiceReminderDate, setInvoiceReminderDate] = useState('');
+    const [invoiceEditForm, setInvoiceEditForm] = useState({
+        id: '',
+        amount: '',
+        due_date: '',
+        status: 'pending',
     });
     const [invoices, setInvoices] = useState<any[]>([]);
     const [downloads, setDownloads] = useState<any[]>([]);
@@ -609,6 +623,10 @@ const AdminView: React.FC<{ currentView: string; user: User; onChangeView?: (vie
 
     const handleCreateInvoice = async () => {
         try {
+            if (!newInvoice.student_id || !newInvoice.amount) {
+                toast.error("Student and amount are required");
+                return false;
+            }
             await createInvoice({
                 student_id: newInvoice.student_id,
                 amount: Number(newInvoice.amount),
@@ -618,8 +636,129 @@ const AdminView: React.FC<{ currentView: string; user: User; onChangeView?: (vie
             setNewInvoice({ student_id: '', amount: '', due_date: '' });
             fetchInvoices();
             fetchFeesStats();
+            return true;
         } catch (err) {
-            toast.error("Failed to create invoice");
+            toast.error((err as any)?.response?.data?.message || "Failed to create invoice");
+            return false;
+        }
+    };
+
+    const openInvoiceDetails = (invoice: any) => {
+        setSelectedInvoice(invoice);
+        setShowInvoiceDetailsModal(true);
+    };
+
+    const openInvoiceEdit = (invoice: any) => {
+        setInvoiceEditForm({
+            id: String(invoice?.id || ''),
+            amount: String(invoice?.amount ?? ''),
+            due_date: invoice?.due_date ? String(invoice.due_date).slice(0, 10) : '',
+            status: String(invoice?.status || 'pending').toLowerCase(),
+        });
+        setShowInvoiceEditModal(true);
+    };
+
+    const getTodayDateInput = () => {
+        const now = new Date();
+        const yyyy = now.getFullYear();
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        const dd = String(now.getDate()).padStart(2, '0');
+        return `${yyyy}-${mm}-${dd}`;
+    };
+
+    const openInvoiceReminderModal = (invoice: any) => {
+        setInvoiceReminderTarget(invoice);
+        setInvoiceReminderDate(getTodayDateInput());
+        setShowInvoiceReminderModal(true);
+    };
+
+    const handleSaveInvoiceEdit = async () => {
+        const idNum = Number(invoiceEditForm.id);
+        if (!Number.isFinite(idNum)) {
+            toast.error("Invalid invoice");
+            return;
+        }
+
+        try {
+            await updateInvoice(idNum, {
+                amount: Number(invoiceEditForm.amount),
+                due_date: invoiceEditForm.due_date || null,
+                status: invoiceEditForm.status,
+            });
+            toast.success("Invoice updated");
+            setShowInvoiceEditModal(false);
+            await Promise.all([fetchInvoices(), fetchFeesStats()]);
+        } catch (err: any) {
+            toast.error(err?.response?.data?.message || "Failed to update invoice");
+        }
+    };
+
+    const handleDeleteInvoice = async (invoice: any) => {
+        const idNum = Number(invoice?.id);
+        if (!Number.isFinite(idNum)) {
+            toast.error("Invalid invoice");
+            return;
+        }
+        const confirmed = window.confirm(`Delete invoice #${idNum}? This action cannot be undone.`);
+        if (!confirmed) return;
+
+        try {
+            await deleteInvoice(idNum);
+            toast.success("Invoice deleted");
+            await Promise.all([fetchInvoices(), fetchFeesStats()]);
+        } catch (err: any) {
+            toast.error(err?.response?.data?.message || "Failed to delete invoice");
+        }
+    };
+
+    const handleSendInvoiceReminder = async (invoice: any, scheduledDate?: string) => {
+        const idNum = Number(invoice?.id);
+        if (!Number.isFinite(idNum)) {
+            toast.error("Invalid invoice");
+            return false;
+        }
+
+        const selectedDate = String(scheduledDate || '').trim();
+        const today = getTodayDateInput();
+        if (selectedDate && selectedDate < today) {
+            toast.error("Reminder date cannot be in the past");
+            return false;
+        }
+
+        const scheduledAt = selectedDate ? `${selectedDate}T09:00:00` : undefined;
+        try {
+            await sendInvoiceReminder(idNum, scheduledAt ? { scheduled_at: scheduledAt } : undefined);
+            toast.success("Reminder queued");
+            return true;
+        } catch (err: any) {
+            const statusCode = Number(err?.response?.status || 0);
+
+            // Backward-compatible fallback for older backend instances
+            if (statusCode === 404) {
+                try {
+                    const dueDateText = invoice?.due_date
+                        ? new Date(invoice.due_date).toISOString().slice(0, 10)
+                        : 'N/A';
+                    await queueNotification({
+                        recipient_type: 'student',
+                        recipient_id: invoice?.student_id,
+                        channel: 'in_app',
+                        title: 'Fee Invoice Reminder',
+                        message: `Reminder: Invoice #${invoice?.id} for ${invoice?.amount} is ${invoice?.status}. Due date: ${dueDateText}.`,
+                        scheduled_at: scheduledAt,
+                        entity_type: 'fees_invoice',
+                        entity_id: invoice?.id,
+                    });
+                    toast.success("Reminder queued");
+                    return true;
+                } catch (fallbackErr: any) {
+                    toast.error(fallbackErr?.response?.data?.message || "Failed to queue reminder");
+                    return false;
+                }
+            }
+
+            toast.error(err?.response?.data?.message || "Failed to queue reminder");
+            return false;
         }
     };
 
@@ -670,7 +809,7 @@ const AdminView: React.FC<{ currentView: string; user: User; onChangeView?: (vie
 
     const fetchNotifications = async () => {
         try {
-            const params: { status?: string; channel?: string; limit?: number } = { limit: 100 };
+            const params: { status?: string; channel?: string; limit?: number; include_future?: boolean } = { limit: 100, include_future: true };
             if (notificationStatusFilter !== 'all') params.status = notificationStatusFilter;
             if (notificationChannelFilter !== 'all') params.channel = notificationChannelFilter;
             const data = await getNotifications(params);
@@ -1245,6 +1384,69 @@ const AdminView: React.FC<{ currentView: string; user: User; onChangeView?: (vie
         setOpenClassMenuId(null);
         if (!classSubject) {
             toast.warning("Assign a subject to this class before adding schedule entries.");
+        }
+    };
+
+    const handleArchiveClass = async (cls: any) => {
+        const classId = Number(cls?.id);
+        if (!Number.isFinite(classId)) {
+            toast.error("Invalid class id");
+            return;
+        }
+
+        const classLabel = `Grade ${cls?.grade || '-'}-${String(cls?.section || '').trim() || '-'}`;
+        const confirmed = window.confirm(`${classLabel} will be archived and hidden from active class lists. Continue?`);
+        if (!confirmed) return;
+
+        try {
+            await archiveClass(classId);
+            toast.success("Class archived successfully");
+            setOpenClassMenuId(null);
+            await Promise.all([fetchClasses(), fetchClassSubjects(), fetchScheduleEntries()]);
+        } catch (err: any) {
+            const status = Number(err?.response?.status || 0);
+            const dependencies = err?.response?.data?.dependencies || {};
+            if (status === 409 && Number(dependencies?.students || 0) > 0) {
+                toast.error(`Cannot archive class with ${dependencies.students} active students. Reassign students first.`);
+                return;
+            }
+            toast.error(err?.response?.data?.message || "Failed to archive class");
+        }
+    };
+
+    const handleDeleteClass = async (cls: any) => {
+        const classId = Number(cls?.id);
+        if (!Number.isFinite(classId)) {
+            toast.error("Invalid class id");
+            return;
+        }
+
+        const classLabel = `Grade ${cls?.grade || '-'}-${String(cls?.section || '').trim() || '-'}`;
+        const confirmed = window.confirm(`Delete ${classLabel}? This action cannot be undone.`);
+        if (!confirmed) return;
+
+        try {
+            await deleteClass(classId);
+            toast.success("Class deleted successfully");
+            setOpenClassMenuId(null);
+            await Promise.all([fetchClasses(), fetchClassSubjects(), fetchScheduleEntries()]);
+        } catch (err: any) {
+            const status = Number(err?.response?.status || 0);
+            const dependencies = err?.response?.data?.dependencies || {};
+            if (status === 409) {
+                const dependencyMessages: string[] = [];
+                if (Number(dependencies?.students || 0) > 0) {
+                    dependencyMessages.push(`${dependencies.students} student(s)`);
+                }
+                if (Number(dependencies?.class_subjects || 0) > 0) {
+                    dependencyMessages.push(`${dependencies.class_subjects} subject assignment(s)`);
+                }
+                if (dependencyMessages.length) {
+                    toast.error(`Cannot delete class: linked ${dependencyMessages.join(', ')}.`);
+                    return;
+                }
+            }
+            toast.error(err?.response?.data?.message || "Failed to delete class");
         }
     };
 
@@ -2737,6 +2939,20 @@ const AdminView: React.FC<{ currentView: string; user: User; onChangeView?: (vie
                                             >
                                                 Add Schedule
                                             </button>
+                                            <button
+                                                type="button"
+                                                className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/20 text-amber-700 dark:text-amber-300"
+                                                onClick={() => handleArchiveClass(cls)}
+                                            >
+                                                Archive Class
+                                            </button>
+                                            <button
+                                                type="button"
+                                                className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-300"
+                                                onClick={() => handleDeleteClass(cls)}
+                                            >
+                                                Delete Class
+                                            </button>
                                         </div>
                                     )}
                                 </div>
@@ -3415,12 +3631,50 @@ const AdminView: React.FC<{ currentView: string; user: User; onChangeView?: (vie
     }
 
     if (currentView === 'fees') {
+        const normalizedInvoiceQuery = invoiceSearchTerm.trim().toLowerCase();
+        const filteredInvoices = invoices.filter((inv: any) => {
+            const status = String(inv?.status || '').toLowerCase();
+            const matchesStatus = invoiceStatusFilter === 'all' || status === invoiceStatusFilter;
+            if (!normalizedInvoiceQuery) return matchesStatus;
+            const invoiceId = String(inv?.id || '').toLowerCase();
+            const studentName = String(inv?.student_name || '').toLowerCase();
+            const amountText = String(inv?.amount || '').toLowerCase();
+            return matchesStatus && (
+                invoiceId.includes(normalizedInvoiceQuery)
+                || studentName.includes(normalizedInvoiceQuery)
+                || amountText.includes(normalizedInvoiceQuery)
+            );
+        });
+
+        const formatInvoiceDate = (value: any) => {
+            if (!value) return '-';
+            const dt = new Date(value);
+            if (Number.isNaN(dt.getTime())) return String(value);
+            return dt.toLocaleDateString();
+        };
+
         return (
             <div className="space-y-6 animate-in fade-in duration-500">
                 <div className="flex justify-between items-center">
                     <h2 className="text-2xl font-bold">Fees & Invoices</h2>
                     <div className="flex gap-2">
-                        <Button variant="outline" icon={Filter}>Filter</Button>
+                        <input
+                            type="text"
+                            placeholder="Search invoice, student, amount..."
+                            value={invoiceSearchTerm}
+                            onChange={(e) => setInvoiceSearchTerm(e.target.value)}
+                            className="w-64 rounded-xl border border-slate-200 bg-white/50 px-4 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
+                        />
+                        <select
+                            value={invoiceStatusFilter}
+                            onChange={(e) => setInvoiceStatusFilter(e.target.value)}
+                            className="rounded-xl border border-slate-200 bg-white/50 px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-800"
+                        >
+                            <option value="all">All Status</option>
+                            <option value="paid">Paid</option>
+                            <option value="pending">Pending</option>
+                            <option value="overdue">Overdue</option>
+                        </select>
                         <Button
                             variant="outline"
                             icon={FileSpreadsheet}
@@ -3480,9 +3734,10 @@ const AdminView: React.FC<{ currentView: string; user: User; onChangeView?: (vie
                     <div className="flex justify-between items-center mb-6">
                         <h3 className="text-lg font-bold">Recent Transactions</h3>
                         <div className="flex gap-2">
-                            <Button size="sm" variant="ghost">All</Button>
-                            <Button size="sm" variant="ghost">Paid</Button>
-                            <Button size="sm" variant="ghost">Pending</Button>
+                            <Button size="sm" variant={invoiceStatusFilter === 'all' ? 'secondary' : 'ghost'} onClick={() => setInvoiceStatusFilter('all')}>All</Button>
+                            <Button size="sm" variant={invoiceStatusFilter === 'paid' ? 'secondary' : 'ghost'} onClick={() => setInvoiceStatusFilter('paid')}>Paid</Button>
+                            <Button size="sm" variant={invoiceStatusFilter === 'pending' ? 'secondary' : 'ghost'} onClick={() => setInvoiceStatusFilter('pending')}>Pending</Button>
+                            <Button size="sm" variant={invoiceStatusFilter === 'overdue' ? 'secondary' : 'ghost'} onClick={() => setInvoiceStatusFilter('overdue')}>Overdue</Button>
                         </div>
                     </div>
                     <div className="overflow-x-auto">
@@ -3492,20 +3747,20 @@ const AdminView: React.FC<{ currentView: string; user: User; onChangeView?: (vie
                                     <th className="px-4 py-3 text-left">Invoice ID</th>
                                     <th className="px-4 py-3 text-left">Student</th>
                                     <th className="px-4 py-3 text-left">Amount</th>
-                                    <th className="px-4 py-3 text-left">Date</th>
-                                    <th className="px-4 py-3 text-left">Method</th>
+                                    <th className="px-4 py-3 text-left">Due Date</th>
+                                    <th className="px-4 py-3 text-left">Created</th>
                                     <th className="px-4 py-3 text-left">Status</th>
                                     <th className="px-4 py-3 text-right">Action</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                                {invoices.map((inv) => (
+                                {filteredInvoices.map((inv) => (
                                     <tr key={inv.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                                         <td className="px-4 py-3 font-mono text-slate-600 dark:text-slate-400">{inv.id}</td>
                                         <td className="px-4 py-3 font-medium">{inv.student_name || inv.student_id}</td>
                                         <td className="px-4 py-3">{`$${inv.amount}`}</td>
-                                        <td className="px-4 py-3 text-slate-500">{inv.created_at || inv.due_date}</td>
-                                        <td className="px-4 py-3 text-slate-500">-</td>
+                                        <td className="px-4 py-3 text-slate-500">{formatInvoiceDate(inv.due_date)}</td>
+                                        <td className="px-4 py-3 text-slate-500">{formatInvoiceDate(inv.created_at)}</td>
                                         <td className="px-4 py-3">
                                             <select
                                                 className="px-2 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs"
@@ -3528,10 +3783,30 @@ const AdminView: React.FC<{ currentView: string; user: User; onChangeView?: (vie
                                             </select>
                                         </td>
                                         <td className="px-4 py-3 text-right">
-                                            <Button size="sm" variant="ghost" icon={Printer} className="px-2"></Button>
+                                            <div className="flex justify-end gap-1">
+                                                <Button size="sm" variant="ghost" className="px-2" onClick={() => openInvoiceDetails(inv)}>View</Button>
+                                                <Button size="sm" variant="ghost" className="px-2" onClick={() => openInvoiceEdit(inv)}>Edit</Button>
+                                                <Button
+                                                    size="sm"
+                                                    variant="ghost"
+                                                    className="px-2"
+                                                    onClick={() => openInvoiceReminderModal(inv)}
+                                                    disabled={String(inv.status || '').toLowerCase() === 'paid'}
+                                                >
+                                                    Remind
+                                                </Button>
+                                                <Button size="sm" variant="ghost" className="px-2 text-red-600 dark:text-red-300" onClick={() => handleDeleteInvoice(inv)}>Delete</Button>
+                                            </div>
                                         </td>
                                     </tr>
                                 ))}
+                                {filteredInvoices.length === 0 && (
+                                    <tr>
+                                        <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
+                                            No invoices found for current filters.
+                                        </td>
+                                    </tr>
+                                )}
                             </tbody>
                         </table>
                     </div>
@@ -3573,7 +3848,133 @@ const AdminView: React.FC<{ currentView: string; user: User; onChangeView?: (vie
                             </div>
                             <div className="flex justify-end gap-3 mt-6">
                                 <Button variant="outline" onClick={() => setShowInvoiceModal(false)}>Cancel</Button>
-                                <Button onClick={() => { handleCreateInvoice(); setShowInvoiceModal(false); }}>Create</Button>
+                                <Button
+                                    onClick={async () => {
+                                        const ok = await handleCreateInvoice();
+                                        if (ok) setShowInvoiceModal(false);
+                                    }}
+                                >
+                                    Create
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {showInvoiceDetailsModal && selectedInvoice && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+                        <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-lg p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
+                            <div className="flex justify-between items-center mb-6">
+                                <h3 className="text-xl font-bold">Invoice #{selectedInvoice.id}</h3>
+                                <button onClick={() => setShowInvoiceDetailsModal(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X size={24} /></button>
+                            </div>
+                            <div className="space-y-3 text-sm">
+                                <div className="flex justify-between"><span className="text-slate-500">Student</span><span className="font-medium">{selectedInvoice.student_name || selectedInvoice.student_id}</span></div>
+                                <div className="flex justify-between"><span className="text-slate-500">Amount</span><span className="font-medium">{`$${selectedInvoice.amount}`}</span></div>
+                                <div className="flex justify-between"><span className="text-slate-500">Due Date</span><span>{formatInvoiceDate(selectedInvoice.due_date)}</span></div>
+                                <div className="flex justify-between"><span className="text-slate-500">Created</span><span>{formatInvoiceDate(selectedInvoice.created_at)}</span></div>
+                                <div className="flex justify-between items-center"><span className="text-slate-500">Status</span><Badge variant={String(selectedInvoice.status).toLowerCase() === 'paid' ? 'success' : String(selectedInvoice.status).toLowerCase() === 'overdue' ? 'danger' : 'warning'}>{selectedInvoice.status}</Badge></div>
+                            </div>
+                            <div className="flex justify-end gap-3 mt-6">
+                                <Button variant="outline" onClick={() => setShowInvoiceDetailsModal(false)}>Close</Button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {showInvoiceEditModal && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+                        <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-lg p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
+                            <div className="flex justify-between items-center mb-6">
+                                <h3 className="text-xl font-bold">Edit Invoice #{invoiceEditForm.id}</h3>
+                                <button onClick={() => setShowInvoiceEditModal(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"><X size={24} /></button>
+                            </div>
+                            <div className="space-y-4">
+                                <Input
+                                    label="Amount"
+                                    type="number"
+                                    value={invoiceEditForm.amount}
+                                    onChange={(e) => setInvoiceEditForm((prev) => ({ ...prev, amount: e.target.value }))}
+                                />
+                                <Input
+                                    label="Due Date"
+                                    type="date"
+                                    value={invoiceEditForm.due_date}
+                                    onChange={(e) => setInvoiceEditForm((prev) => ({ ...prev, due_date: e.target.value }))}
+                                />
+                                <div>
+                                    <label className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5 block">Status</label>
+                                    <select
+                                        className="w-full rounded-xl border border-slate-200 bg-white/50 px-4 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-800"
+                                        value={invoiceEditForm.status}
+                                        onChange={(e) => setInvoiceEditForm((prev) => ({ ...prev, status: e.target.value }))}
+                                    >
+                                        <option value="paid">paid</option>
+                                        <option value="pending">pending</option>
+                                        <option value="overdue">overdue</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div className="flex justify-end gap-3 mt-6">
+                                <Button variant="outline" onClick={() => setShowInvoiceEditModal(false)}>Cancel</Button>
+                                <Button onClick={handleSaveInvoiceEdit}>Save Changes</Button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {showInvoiceReminderModal && invoiceReminderTarget && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+                        <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-lg p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
+                            <div className="flex justify-between items-center mb-6">
+                                <h3 className="text-xl font-bold">Schedule Reminder</h3>
+                                <button
+                                    onClick={() => {
+                                        setShowInvoiceReminderModal(false);
+                                        setInvoiceReminderTarget(null);
+                                    }}
+                                    className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                                >
+                                    <X size={24} />
+                                </button>
+                            </div>
+
+                            <div className="space-y-4">
+                                <div className="rounded-xl border border-slate-200 dark:border-slate-700 p-4 bg-slate-50 dark:bg-slate-800/40 text-sm">
+                                    <p><span className="text-slate-500">Invoice:</span> <span className="font-medium">#{invoiceReminderTarget.id}</span></p>
+                                    <p><span className="text-slate-500">Student:</span> <span className="font-medium">{invoiceReminderTarget.student_name || invoiceReminderTarget.student_id}</span></p>
+                                    <p><span className="text-slate-500">Status:</span> <span className="font-medium">{invoiceReminderTarget.status}</span></p>
+                                </div>
+                                <Input
+                                    label="Remind On Date"
+                                    type="date"
+                                    min={getTodayDateInput()}
+                                    value={invoiceReminderDate}
+                                    onChange={(e) => setInvoiceReminderDate(e.target.value)}
+                                />
+                            </div>
+
+                            <div className="flex justify-end gap-3 mt-6">
+                                <Button
+                                    variant="outline"
+                                    onClick={() => {
+                                        setShowInvoiceReminderModal(false);
+                                        setInvoiceReminderTarget(null);
+                                    }}
+                                >
+                                    Cancel
+                                </Button>
+                                <Button
+                                    onClick={async () => {
+                                        const ok = await handleSendInvoiceReminder(invoiceReminderTarget, invoiceReminderDate);
+                                        if (ok) {
+                                            setShowInvoiceReminderModal(false);
+                                            setInvoiceReminderTarget(null);
+                                        }
+                                    }}
+                                >
+                                    Queue Reminder
+                                </Button>
                             </div>
                         </div>
                     </div>

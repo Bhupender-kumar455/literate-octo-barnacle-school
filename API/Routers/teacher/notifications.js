@@ -58,6 +58,7 @@ router.get('/', async (req, res) => {
                     )
                   )
                   AND status IN ('queued', 'sent', 'read')
+                  AND (scheduled_at IS NULL OR scheduled_at <= GETDATE())
                 ORDER BY created_at DESC
             `);
 
@@ -101,6 +102,7 @@ router.put('/:id/read', async (req, res) => {
                       AND (recipient_id IS NULL OR recipient_id IN (@teacher_id, @user_id))
                     )
                   )
+                  AND (scheduled_at IS NULL OR scheduled_at <= GETDATE())
             `);
 
         const affected = Array.isArray(result.rowsAffected) ? (result.rowsAffected[0] || 0) : 0;

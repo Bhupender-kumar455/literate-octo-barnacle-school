@@ -109,6 +109,16 @@ export const createClass = async (payload: any) => {
   return res.data;
 };
 
+export const archiveClass = async (id: number | string, payload?: { reason?: string }) => {
+  const res = await api.patch(`/admin/classes/${id}/archive`, payload || {});
+  return res.data;
+};
+
+export const deleteClass = async (id: number | string) => {
+  const res = await api.delete(`/admin/classes/${id}`);
+  return res.data;
+};
+
 export const getStudents = async () => {
   const res = await api.get("/admin/students");
   return res.data;
@@ -171,6 +181,27 @@ export const updateInvoiceStatus = async (id: number | string, status: string) =
   return res.data;
 };
 
+export const updateInvoice = async (
+  id: number | string,
+  payload: { amount?: number; due_date?: string | null; status?: string }
+) => {
+  const res = await api.put(`/admin/fees/invoices/${id}`, payload);
+  return res.data;
+};
+
+export const deleteInvoice = async (id: number | string) => {
+  const res = await api.delete(`/admin/fees/invoices/${id}`);
+  return res.data;
+};
+
+export const sendInvoiceReminder = async (
+  id: number | string,
+  payload?: { scheduled_at?: string }
+) => {
+  const res = await api.post(`/admin/fees/invoices/${id}/reminder`, payload || {});
+  return res.data;
+};
+
 export const getAttendanceReport = async (from?: string, to?: string) => {
   const res = await api.get("/admin/reports/attendance-summary", { params: { from, to } });
   return res.data;
@@ -226,7 +257,7 @@ export const createNotificationTemplate = async (payload: any) => {
   return res.data;
 };
 
-export const getNotifications = async (params?: { status?: string; channel?: string; limit?: number }) => {
+export const getNotifications = async (params?: { status?: string; channel?: string; limit?: number; include_future?: boolean }) => {
   const res = await api.get("/admin/notifications", { params });
   return res.data;
 };

@@ -104,6 +104,7 @@ router.post('/templates', audit('create_notification_template', 'notification_te
 router.get('/', async (req, res) => {
   const status = req.query.status ? normalizeStatus(req.query.status) : null;
   const channel = req.query.channel ? normalizeChannel(req.query.channel) : null;
+  const includeFuture = String(req.query.include_future || '').toLowerCase() === 'true';
   const limitRaw = Number(req.query.limit);
   const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 200) : 50;
 
@@ -120,6 +121,7 @@ router.get('/', async (req, res) => {
       .input('school_id', sql.BigInt, req.user.school_id)
       .input('status', sql.VarChar(20), status)
       .input('channel', sql.VarChar(20), channel)
+      .input('include_future', sql.Bit, includeFuture ? 1 : 0)
       .input('limit', sql.Int, limit)
       .query(`
         SELECT TOP (@limit)
@@ -148,6 +150,7 @@ router.get('/', async (req, res) => {
         WHERE school_id = @school_id
           AND (@status IS NULL OR status = @status)
           AND (@channel IS NULL OR channel = @channel)
+          AND (@include_future = 1 OR scheduled_at IS NULL OR scheduled_at <= GETDATE())
         ORDER BY created_at DESC
       `);
     res.json(result.recordset);

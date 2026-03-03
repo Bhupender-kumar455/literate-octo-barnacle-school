@@ -106,6 +106,145 @@ router.get('/invoices', async (req, res) => {
   }
 });
 
+router.put('/invoices/:id', audit('update_invoice', 'fees'), async (req, res) => {
+  const idNum = Number(req.params.id);
+  if (!Number.isFinite(idNum)) {
+    return res.status(400).json({ message: 'Invalid invoice id' });
+  }
+
+  const hasAmount = req.body.amount !== undefined && req.body.amount !== null && String(req.body.amount) !== '';
+  const hasDueDate = req.body.due_date !== undefined;
+  const hasStatus = req.body.status !== undefined && req.body.status !== null && String(req.body.status).trim() !== '';
+
+  if (!hasAmount && !hasDueDate && !hasStatus) {
+    return res.status(400).json({ message: 'At least one field is required: amount, due_date, status' });
+  }
+
+  const amountValue = hasAmount ? Number(req.body.amount) : null;
+  if (hasAmount && (!Number.isFinite(amountValue) || amountValue < 0)) {
+    return res.status(400).json({ message: 'Invalid amount' });
+  }
+
+  let normalizedStatus = null;
+  if (hasStatus) {
+    normalizedStatus = String(req.body.status).toLowerCase();
+    if (!['paid', 'pending', 'overdue'].includes(normalizedStatus)) {
+      return res.status(400).json({ message: 'Invalid status' });
+    }
+  }
+
+  try {
+    const pool = await poolPromise;
+    const result = await pool.request()
+      .input('id', sql.Int, idNum)
+      .input('school_id', sql.Int, req.user.school_id)
+      .input('has_amount', sql.Bit, hasAmount ? 1 : 0)
+      .input('amount', sql.Decimal(12, 2), hasAmount ? amountValue : null)
+      .input('has_due_date', sql.Bit, hasDueDate ? 1 : 0)
+      .input('due_date', sql.Date, hasDueDate ? (req.body.due_date || null) : null)
+      .input('has_status', sql.Bit, hasStatus ? 1 : 0)
+      .input('status', sql.VarChar(20), hasStatus ? normalizedStatus : null)
+      .query(`
+        UPDATE fees_invoices
+        SET amount = CASE WHEN @has_amount = 1 THEN @amount ELSE amount END,
+            due_date = CASE WHEN @has_due_date = 1 THEN @due_date ELSE due_date END,
+            status = CASE WHEN @has_status = 1 THEN @status ELSE status END
+        WHERE id = @id AND school_id = @school_id
+      `);
+
+    const affected = Array.isArray(result.rowsAffected) ? (result.rowsAffected[0] || 0) : 0;
+    if (!affected) {
+      return res.status(404).json({ message: 'Invoice not found for this school' });
+    }
+
+    res.json({ message: 'Invoice updated' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.delete('/invoices/:id', audit('delete_invoice', 'fees'), async (req, res) => {
+  const idNum = Number(req.params.id);
+  if (!Number.isFinite(idNum)) {
+    return res.status(400).json({ message: 'Invalid invoice id' });
+  }
+
+  try {
+    const pool = await poolPromise;
+    const result = await pool.request()
+      .input('id', sql.Int, idNum)
+      .input('school_id', sql.Int, req.user.school_id)
+      .query('DELETE FROM fees_invoices WHERE id = @id AND school_id = @school_id');
+
+    const affected = Array.isArray(result.rowsAffected) ? (result.rowsAffected[0] || 0) : 0;
+    if (!affected) {
+      return res.status(404).json({ message: 'Invoice not found for this school' });
+    }
+
+    res.json({ message: 'Invoice deleted' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.post('/invoices/:id/reminder', audit('send_invoice_reminder', 'fees'), async (req, res) => {
+  const idNum = Number(req.params.id);
+  if (!Number.isFinite(idNum)) {
+    return res.status(400).json({ message: 'Invalid invoice id' });
+  }
+
+  let scheduledAtValue = null;
+  if (req.body?.scheduled_at) {
+    const parsed = new Date(req.body.scheduled_at);
+    if (Number.isNaN(parsed.getTime())) {
+      return res.status(400).json({ message: 'Invalid scheduled_at' });
+    }
+    scheduledAtValue = parsed;
+  }
+
+  try {
+    const pool = await poolPromise;
+    const invoiceRes = await pool.request()
+      .input('id', sql.Int, idNum)
+      .input('school_id', sql.Int, req.user.school_id)
+      .query(`
+        SELECT TOP 1 id, school_id, student_id, amount, due_date, status
+        FROM fees_invoices
+        WHERE id = @id AND school_id = @school_id
+      `);
+
+    const invoice = invoiceRes.recordset[0];
+    if (!invoice) {
+      return res.status(404).json({ message: 'Invoice not found for this school' });
+    }
+
+    if (String(invoice.status).toLowerCase() === 'paid') {
+      return res.status(400).json({ message: 'Invoice is already paid' });
+    }
+
+    const dueDateText = invoice.due_date ? new Date(invoice.due_date).toISOString().slice(0, 10) : 'N/A';
+    await pool.request()
+      .input('school_id', sql.Int, req.user.school_id)
+      .input('recipient_id', sql.Int, invoice.student_id)
+      .input('title', sql.NVarChar(255), 'Fee Invoice Reminder')
+      .input('message', sql.NVarChar(sql.MAX), `Reminder: Invoice #${invoice.id} for ${invoice.amount} is ${invoice.status}. Due date: ${dueDateText}.`)
+      .input('scheduled_at', sql.DateTime, scheduledAtValue)
+      .input('entity_type', sql.VarChar(50), 'fees_invoice')
+      .input('entity_id', sql.Int, invoice.id)
+      .input('created_by', sql.Int, req.user.id)
+      .query(`
+        INSERT INTO notifications
+        (school_id, recipient_type, recipient_id, channel, title, message, status, scheduled_at, entity_type, entity_id, created_by)
+        VALUES
+        (@school_id, 'student', @recipient_id, 'in_app', @title, @message, 'queued', @scheduled_at, @entity_type, @entity_id, @created_by)
+      `);
+
+    res.json({ message: 'Reminder queued successfully' });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
 router.get('/invoices.csv', async (req, res) => {
   try {
     const pool = await poolPromise;
