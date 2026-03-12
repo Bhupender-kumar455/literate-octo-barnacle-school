@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { API_BASE_URL, getAdminStats, getTeachers, getClasses, createClass, archiveClass, deleteClass, getStudents, getAnnouncements, getFeesStats, getInvoices, getReportDownloads, logReportDownload, getAttendanceReport, getAttendanceDetailedReport, getFeeReport, getAcademicReport, downloadAttendanceCsv, downloadFeeCsv, downloadAcademicCsv, downloadStudentsCsv, downloadInvoicesCsv, downloadStudentsPdf, downloadInvoicesPdf, downloadAttendancePdf, downloadFeePdf, downloadAcademicPdf, getGrades, createGrade, createStudent, createAnnouncement, createInvoice, updateInvoiceStatus, updateInvoice, deleteInvoice, sendInvoiceReminder, getSubjects, createSubject, getClassSubjects, createClassSubject, getScheduleEntries, createScheduleEntry, deleteScheduleEntry, updateTeacher, deleteTeacher, updateStudent, getStudentReportCardTerms, getStudentReportCard, downloadStudentReportCardPdf, getNotificationTemplates, createNotificationTemplate, getNotifications, queueNotification, triggerFeeDueNotifications, updateNotificationStatus, runNotificationDispatchNow, getAdminLeaves, updateAdminLeaveStatus } from '../services/api';
+import { API_BASE_URL, getAdminStats, getTeachers, getClasses, createClass, archiveClass, deleteClass, getStudents, getAnnouncements, getFeesStats, getInvoices, getReportDownloads, logReportDownload, getAttendanceReport, getAttendanceDetailedReport, getFeeReport, getAcademicReport, downloadAttendanceCsv, downloadFeeCsv, downloadAcademicCsv, downloadStudentsCsv, downloadInvoicesCsv, downloadStudentsPdf, downloadInvoicesPdf, downloadAttendancePdf, downloadFeePdf, downloadAcademicPdf, getGrades, createGrade, createStudent, createAnnouncement, createInvoice, updateInvoiceStatus, updateInvoice, deleteInvoice, sendInvoiceReminder, getSubjects, createSubject, getClassSubjects, createClassSubject, getScheduleEntries, createScheduleEntry, deleteScheduleEntry, updateTeacher, deleteTeacher, updateStudent, getStudentReportCardTerms, getStudentReportCard, downloadStudentReportCardPdf, getNotificationTemplates, createNotificationTemplate, getNotifications, queueNotification, triggerFeeDueNotifications, updateNotificationStatus, runNotificationDispatchNow, getAdminLeaves, updateAdminLeaveStatus, getAdminParents, getAdminParent, createAdminParent, updateAdminParent, deleteAdminParent, linkStudentToParent, unlinkStudentFromParent } from '../services/api';
 import { Card, Button, StatCard, Badge, Input } from './UIComponents';
 import {
     Users,
@@ -243,6 +243,25 @@ const AdminView: React.FC<{ currentView: string; user: User; onChangeView?: (vie
     const [leaveRoleFilter, setLeaveRoleFilter] = useState('all');
     const [leaveStatusFilter, setLeaveStatusFilter] = useState('all');
 
+    // Parent Management State
+    const [parents, setParents] = useState<any[]>([]);
+    const [isLoadingParents, setIsLoadingParents] = useState(false);
+    const [showAddParentModal, setShowAddParentModal] = useState(false);
+    const [showLinkStudentModal, setShowLinkStudentModal] = useState(false);
+    const [selectedParent, setSelectedParent] = useState<any | null>(null);
+    const [parentSearchTerm, setParentSearchTerm] = useState('');
+    const [newParent, setNewParent] = useState({
+        name: '',
+        email: '',
+        password: '',
+        phone: '',
+        address: ''
+    });
+    const [linkStudentForm, setLinkStudentForm] = useState({
+        student_id: '',
+        relationship: 'guardian'
+    });
+
     const filteredStudents = students.filter((student) => {
         const query = studentSearchTerm.trim().toLowerCase();
         const className = String((student as any).class_name || '');
@@ -438,6 +457,10 @@ const AdminView: React.FC<{ currentView: string; user: User; onChangeView?: (vie
             fetchNotificationTemplates();
             fetchStudents();
             fetchTeachers();
+        }
+        if (currentView === 'parents') {
+            fetchParents();
+            fetchStudents();
         }
     }, [currentView]);
 
@@ -795,6 +818,81 @@ const AdminView: React.FC<{ currentView: string; user: User; onChangeView?: (vie
             setClassSubjects(Array.isArray(data) ? data : []);
         } catch (error) {
             console.error("Error fetching class subjects:", error);
+        }
+    };
+
+    const fetchParents = async () => {
+        setIsLoadingParents(true);
+        try {
+            const data = await getAdminParents();
+            setParents(Array.isArray(data) ? data : []);
+        } catch (error) {
+            console.error("Error fetching parents:", error);
+            toast.error("Failed to load parents");
+        } finally {
+            setIsLoadingParents(false);
+        }
+    };
+
+    const handleCreateParent = async () => {
+        try {
+            await createAdminParent(newParent);
+            toast.success("Parent account created");
+            setShowAddParentModal(false);
+            setNewParent({ name: '', email: '', password: '', phone: '', address: '' });
+            fetchParents();
+        } catch (err: any) {
+            toast.error(err?.response?.data?.message || "Failed to create parent");
+        }
+    };
+
+    const handleDeleteParent = async (id: number | string) => {
+        if (!window.confirm("Are you sure you want to delete this parent account? This will also remove all student links.")) return;
+        try {
+            await deleteAdminParent(id);
+            toast.success("Parent account deleted");
+            fetchParents();
+        } catch (err: any) {
+            toast.error(err?.response?.data?.message || "Failed to delete parent");
+        }
+    };
+
+    const handleLinkStudent = async () => {
+        if (!selectedParent || !linkStudentForm.student_id) return;
+        try {
+            await linkStudentToParent(selectedParent.id, linkStudentForm.student_id, linkStudentForm.relationship);
+            toast.success("Student linked to parent");
+            setLinkStudentForm({ student_id: '', relationship: 'guardian' });
+
+            // Re-fetch parent details to show updated linked students
+            const updated = await getAdminParent(selectedParent.id);
+            setSelectedParent(updated);
+            fetchParents();
+        } catch (err: any) {
+            toast.error(err?.response?.data?.message || "Failed to link student");
+        }
+    };
+
+    const handleUnlinkStudent = async (parentId: number | string, studentId: number | string) => {
+        if (!window.confirm("Unlink this student from parent?")) return;
+        try {
+            await unlinkStudentFromParent(parentId, studentId);
+            toast.success("Student unlinked");
+            const updated = await getAdminParent(parentId);
+            setSelectedParent(updated);
+            fetchParents();
+        } catch (err: any) {
+            toast.error(err?.response?.data?.message || "Failed to unlink student");
+        }
+    };
+
+    const openManageParent = async (parent: any) => {
+        try {
+            const detailed = await getAdminParent(parent.id);
+            setSelectedParent(detailed);
+            setShowLinkStudentModal(true);
+        } catch (err) {
+            toast.error("Failed to load parent details");
         }
     };
 
@@ -2259,16 +2357,16 @@ const AdminView: React.FC<{ currentView: string; user: User; onChangeView?: (vie
                         const teacherIdKey = String((teacher as any).id);
                         const isTeacherMenuOpen = openTeacherMenuId === teacherIdKey;
                         return (
-                        <Card key={teacher.id} className={`group relative overflow-visible ${isTeacherMenuOpen ? 'z-30' : 'z-0'}`}>
-                            <div className="flex items-start justify-between mb-4">
-                                {resolveImageSrc(teacher.logo) ? (
-                                    <img src={resolveImageSrc(teacher.logo)} alt={teacher.name} className="w-16 h-16 rounded-full object-cover border-2 border-white dark:border-slate-700 shadow-sm" />
-                                ) : (
-                                    <div className="w-16 h-16 rounded-full bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center text-lg font-bold text-indigo-700 dark:text-indigo-300 border-2 border-white dark:border-slate-700 shadow-sm">
-                                        {String(teacher.name || 'T').charAt(0)}
-                                    </div>
-                                )}
-                                {(() => {
+                            <Card key={teacher.id} className={`group relative overflow-visible ${isTeacherMenuOpen ? 'z-30' : 'z-0'}`}>
+                                <div className="flex items-start justify-between mb-4">
+                                    {resolveImageSrc(teacher.logo) ? (
+                                        <img src={resolveImageSrc(teacher.logo)} alt={teacher.name} className="w-16 h-16 rounded-full object-cover border-2 border-white dark:border-slate-700 shadow-sm" />
+                                    ) : (
+                                        <div className="w-16 h-16 rounded-full bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center text-lg font-bold text-indigo-700 dark:text-indigo-300 border-2 border-white dark:border-slate-700 shadow-sm">
+                                            {String(teacher.name || 'T').charAt(0)}
+                                        </div>
+                                    )}
+                                    {(() => {
                                         const status = teacher.is_active;
                                         const statusStr = String(status).toLowerCase();
                                         const isActive = status === true || statusStr === '1' || statusStr === 'true';
@@ -2279,72 +2377,73 @@ const AdminView: React.FC<{ currentView: string; user: User; onChangeView?: (vie
                                         else { text = 'Unknown'; variant = 'secondary'; }
                                         return <Badge variant={variant}>{text}</Badge>;
                                     })()}
-                            </div>
-                            <h3 className="text-lg font-bold text-slate-900 dark:text-white">{teacher.name}</h3>
-                            <p className="text-sm text-slate-500 mb-4">{teacher.department || 'N/A'}</p>
-
-                            <div className="space-y-2 text-sm">
-                                <div className="flex items-center gap-3 text-slate-600 dark:text-slate-400">
-                                    <Mail size={16} />
-                                    <span>{teacher.email}</span>
                                 </div>
-                                <div className="flex items-center gap-3 text-slate-600 dark:text-slate-400">
-                                    <Phone size={16} />
-                                    <span>{teacher.phone || 'N/A'}</span>
-                                </div>
-                            </div>
+                                <h3 className="text-lg font-bold text-slate-900 dark:text-white">{teacher.name}</h3>
+                                <p className="text-sm text-slate-500 mb-4">{teacher.department || 'N/A'}</p>
 
-                            <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 flex gap-2">
-                                <Button
-                                    size="sm"
-                                    variant="outline"
-                                    className="flex-1"
-                                    onClick={() => openTeacherProfile(teacher, false)}
-                                >
-                                    View Profile
-                                </Button>
-                                <div className="relative" onClick={(e) => e.stopPropagation()}>
+                                <div className="space-y-2 text-sm">
+                                    <div className="flex items-center gap-3 text-slate-600 dark:text-slate-400">
+                                        <Mail size={16} />
+                                        <span>{teacher.email}</span>
+                                    </div>
+                                    <div className="flex items-center gap-3 text-slate-600 dark:text-slate-400">
+                                        <Phone size={16} />
+                                        <span>{teacher.phone || 'N/A'}</span>
+                                    </div>
+                                </div>
+
+                                <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 flex gap-2">
                                     <Button
                                         size="sm"
-                                        variant="secondary"
-                                        className="px-3"
-                                        aria-label={`Open actions for ${teacher.name}`}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            setOpenTeacherMenuId((prev) => prev === teacherIdKey ? null : teacherIdKey);
-                                        }}
+                                        variant="outline"
+                                        className="flex-1"
+                                        onClick={() => openTeacherProfile(teacher, false)}
                                     >
-                                        <MoreHorizontal size={16} />
+                                        View Profile
                                     </Button>
-                                    {isTeacherMenuOpen && (
-                                        <div className="absolute right-0 mt-2 w-44 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl p-1 z-50">
-                                            <button
-                                                type="button"
-                                                className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-                                                onClick={() => openTeacherProfile(teacher, false)}
-                                            >
-                                                View Profile
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-                                                onClick={() => openTeacherProfile(teacher, true)}
-                                            >
-                                                Edit Profile
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className="w-full text-left px-3 py-2 text-sm rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
-                                                onClick={() => handleDeleteTeacher(teacher)}
-                                            >
-                                                Delete Teacher
-                                            </button>
-                                        </div>
-                                    )}
+                                    <div className="relative" onClick={(e) => e.stopPropagation()}>
+                                        <Button
+                                            size="sm"
+                                            variant="secondary"
+                                            className="px-3"
+                                            aria-label={`Open actions for ${teacher.name}`}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setOpenTeacherMenuId((prev) => prev === teacherIdKey ? null : teacherIdKey);
+                                            }}
+                                        >
+                                            <MoreHorizontal size={16} />
+                                        </Button>
+                                        {isTeacherMenuOpen && (
+                                            <div className="absolute right-0 mt-2 w-44 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl p-1 z-50">
+                                                <button
+                                                    type="button"
+                                                    className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                                                    onClick={() => openTeacherProfile(teacher, false)}
+                                                >
+                                                    View Profile
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                                                    onClick={() => openTeacherProfile(teacher, true)}
+                                                >
+                                                    Edit Profile
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="w-full text-left px-3 py-2 text-sm rounded-lg text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
+                                                    onClick={() => handleDeleteTeacher(teacher)}
+                                                >
+                                                    Delete Teacher
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
-                            </div>
-                        </Card>
-                    )})}
+                            </Card>
+                        )
+                    })}
                 </div>
 
                 {showAddTeacherModal && (
@@ -2897,85 +2996,86 @@ const AdminView: React.FC<{ currentView: string; user: User; onChangeView?: (vie
                         const classId = String((cls as any).id);
                         const isClassMenuOpen = openClassMenuId === classId;
                         return (
-                        <Card key={cls.id} className="relative overflow-hidden group">
-                            <div className="absolute top-0 left-0 w-2 h-full bg-indigo-500"></div>
-                            <div className="flex justify-between items-start">
-                                <div>
-                                    <h3 className="text-2xl font-bold">Grade {cls.grade}-{cls.section}</h3>
-                                    <p className="text-slate-500 text-sm">Academic Year: {cls.academic_year}</p>
+                            <Card key={cls.id} className="relative overflow-hidden group">
+                                <div className="absolute top-0 left-0 w-2 h-full bg-indigo-500"></div>
+                                <div className="flex justify-between items-start">
+                                    <div>
+                                        <h3 className="text-2xl font-bold">Grade {cls.grade}-{cls.section}</h3>
+                                        <p className="text-slate-500 text-sm">Academic Year: {cls.academic_year}</p>
+                                    </div>
+                                    <div className="relative" onClick={(e) => e.stopPropagation()}>
+                                        <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            icon={MoreHorizontal}
+                                            className="px-2"
+                                            aria-label={`Open actions for Grade ${cls.grade}-${cls.section}`}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setOpenClassMenuId((prev) => prev === classId ? null : classId);
+                                            }}
+                                        />
+                                        {isClassMenuOpen && (
+                                            <div className="absolute right-0 mt-2 w-44 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl p-1 z-20">
+                                                <button
+                                                    type="button"
+                                                    className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                                                    onClick={() => openClassTimetable(classId)}
+                                                >
+                                                    View Timetable
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                                                    onClick={() => openAssignSubjectModalForClass(classId)}
+                                                >
+                                                    Assign Subject
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
+                                                    onClick={() => openScheduleModalForClass(classId)}
+                                                >
+                                                    Add Schedule
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/20 text-amber-700 dark:text-amber-300"
+                                                    onClick={() => handleArchiveClass(cls)}
+                                                >
+                                                    Archive Class
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-300"
+                                                    onClick={() => handleDeleteClass(cls)}
+                                                >
+                                                    Delete Class
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
-                                <div className="relative" onClick={(e) => e.stopPropagation()}>
-                                    <Button
-                                        size="sm"
-                                        variant="ghost"
-                                        icon={MoreHorizontal}
-                                        className="px-2"
-                                        aria-label={`Open actions for Grade ${cls.grade}-${cls.section}`}
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            setOpenClassMenuId((prev) => prev === classId ? null : classId);
-                                        }}
-                                    />
-                                    {isClassMenuOpen && (
-                                        <div className="absolute right-0 mt-2 w-44 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl p-1 z-20">
-                                            <button
-                                                type="button"
-                                                className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-                                                onClick={() => openClassTimetable(classId)}
-                                            >
-                                                View Timetable
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-                                                onClick={() => openAssignSubjectModalForClass(classId)}
-                                            >
-                                                Assign Subject
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800"
-                                                onClick={() => openScheduleModalForClass(classId)}
-                                            >
-                                                Add Schedule
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-amber-50 dark:hover:bg-amber-900/20 text-amber-700 dark:text-amber-300"
-                                                onClick={() => handleArchiveClass(cls)}
-                                            >
-                                                Archive Class
-                                            </button>
-                                            <button
-                                                type="button"
-                                                className="w-full text-left px-3 py-2 text-sm rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 text-red-600 dark:text-red-300"
-                                                onClick={() => handleDeleteClass(cls)}
-                                            >
-                                                Delete Class
-                                            </button>
-                                        </div>
-                                    )}
+                                <div className="mt-6 space-y-2">
+                                    <div className="flex justify-between text-sm border-b border-slate-100 dark:border-slate-800 pb-2">
+                                        <span className="text-slate-500">Class Teacher</span>
+                                        <span className="font-medium">{cls.teacher_name || 'Unassigned'}</span>
+                                    </div>
+                                    <div className="flex justify-between text-sm border-b border-slate-100 dark:border-slate-800 pb-2">
+                                        <span className="text-slate-500">Students</span>
+                                        <span className="font-medium">32</span>
+                                    </div>
                                 </div>
-                            </div>
-                            <div className="mt-6 space-y-2">
-                                <div className="flex justify-between text-sm border-b border-slate-100 dark:border-slate-800 pb-2">
-                                    <span className="text-slate-500">Class Teacher</span>
-                                    <span className="font-medium">{cls.teacher_name || 'Unassigned'}</span>
-                                </div>
-                                <div className="flex justify-between text-sm border-b border-slate-100 dark:border-slate-800 pb-2">
-                                    <span className="text-slate-500">Students</span>
-                                    <span className="font-medium">32</span>
-                                </div>
-                            </div>
-                            <Button
-                                variant="outline"
-                                className="w-full mt-4 text-sm"
-                                onClick={() => openClassTimetable(classId)}
-                            >
-                                View Timetable
-                            </Button>
-                        </Card>
-                    )}) : (
+                                <Button
+                                    variant="outline"
+                                    className="w-full mt-4 text-sm"
+                                    onClick={() => openClassTimetable(classId)}
+                                >
+                                    View Timetable
+                                </Button>
+                            </Card>
+                        )
+                    }) : (
                         <div className="col-span-3 text-center py-12">
                             <p className="text-slate-500">No classes found. Create your first class to get started!</p>
                         </div>
@@ -4567,6 +4667,239 @@ const AdminView: React.FC<{ currentView: string; user: User; onChangeView?: (vie
                         </table>
                     </div>
                 </Card>
+            </div>
+        );
+    }
+
+    if (currentView === 'parents') {
+        const filteredParents = parents.filter(p =>
+            p.name.toLowerCase().includes(parentSearchTerm.toLowerCase()) ||
+            (p.email && p.email.toLowerCase().includes(parentSearchTerm.toLowerCase())) ||
+            (p.phone && p.phone.includes(parentSearchTerm))
+        );
+
+        return (
+            <div className="space-y-6 animate-in fade-in duration-500">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                    <div>
+                        <h2 className="text-2xl font-bold">Parent Management</h2>
+                        <p className="text-slate-500">Manage parent accounts and link them to students</p>
+                    </div>
+                    <Button icon={Plus} onClick={() => setShowAddParentModal(true)}>Add Parent Account</Button>
+                </div>
+
+                <Card>
+                    <div className="flex items-center gap-3 mb-6 bg-slate-50 dark:bg-slate-800/50 p-3 rounded-xl border border-slate-100 dark:border-slate-800">
+                        <Search size={20} className="text-slate-400" />
+                        <input
+                            type="text"
+                            placeholder="Search parents by name, email or phone..."
+                            className="bg-transparent border-none outline-none text-sm w-full"
+                            value={parentSearchTerm}
+                            onChange={(e) => setParentSearchTerm(e.target.value)}
+                        />
+                    </div>
+
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="text-left text-slate-500 border-b border-slate-100 dark:border-slate-800">
+                                    <th className="pb-3 font-medium">Parent Name</th>
+                                    <th className="pb-3 font-medium">Contact</th>
+                                    <th className="pb-3 font-medium text-center">Linked Students</th>
+                                    <th className="pb-3 font-medium">Account Status</th>
+                                    <th className="pb-3 font-medium text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                                {isLoadingParents ? (
+                                    <tr>
+                                        <td colSpan={5} className="py-8 text-center text-slate-500">Loading parents...</td>
+                                    </tr>
+                                ) : filteredParents.length === 0 ? (
+                                    <tr>
+                                        <td colSpan={5} className="py-8 text-center text-slate-500">No parents found. Click "Add Parent Account" to get started.</td>
+                                    </tr>
+                                ) : filteredParents.map((parent) => (
+                                    <tr key={parent.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
+                                        <td className="py-4">
+                                            <div className="font-bold">{parent.name}</div>
+                                            <div className="text-xs text-slate-500">ID: #{parent.id}</div>
+                                        </td>
+                                        <td className="py-4">
+                                            <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
+                                                <Mail size={14} className="text-slate-400" />
+                                                {parent.email}
+                                            </div>
+                                            {parent.phone && (
+                                                <div className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300 mt-1">
+                                                    <Phone size={14} className="text-slate-400" />
+                                                    {parent.phone}
+                                                </div>
+                                            )}
+                                        </td>
+                                        <td className="py-4 text-center">
+                                            <Badge variant={parent.linked_students_count > 0 ? 'success' : 'warning'}>
+                                                {parent.linked_students_count} {parent.linked_students_count === 1 ? 'Student' : 'Students'}
+                                            </Badge>
+                                        </td>
+                                        <td className="py-4">
+                                            <Badge variant={parent.is_active ? 'success' : 'danger'}>
+                                                {parent.is_active ? 'Active' : 'Inactive'}
+                                            </Badge>
+                                        </td>
+                                        <td className="py-4 text-right">
+                                            <div className="flex justify-end gap-2">
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    icon={Users}
+                                                    onClick={() => openManageParent(parent)}
+                                                >
+                                                    Manage Students
+                                                </Button>
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                                    icon={X}
+                                                    onClick={() => handleDeleteParent(parent.id)}
+                                                />
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </Card>
+
+                {/* Add Parent Modal */}
+                {showAddParentModal && (
+                    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                        <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-md p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
+                            <div className="flex justify-between items-center mb-6">
+                                <h3 className="text-xl font-bold">New Parent Account</h3>
+                                <button onClick={() => setShowAddParentModal(false)} className="text-slate-400 hover:text-slate-600"><X size={24} /></button>
+                            </div>
+                            <div className="space-y-4">
+                                <Input
+                                    label="Full Name"
+                                    placeholder="e.g. John Doe"
+                                    value={newParent.name}
+                                    onChange={(e) => setNewParent({ ...newParent, name: e.target.value })}
+                                />
+                                <Input
+                                    label="Email Address"
+                                    type="email"
+                                    placeholder="parent@example.com"
+                                    value={newParent.email}
+                                    onChange={(e) => setNewParent({ ...newParent, email: e.target.value })}
+                                />
+                                <Input
+                                    label="Password"
+                                    type="password"
+                                    value={newParent.password}
+                                    onChange={(e) => setNewParent({ ...newParent, password: e.target.value })}
+                                />
+                                <Input
+                                    label="Phone Number"
+                                    placeholder="+1 234 567 890"
+                                    value={newParent.phone}
+                                    onChange={(e) => setNewParent({ ...newParent, phone: e.target.value })}
+                                />
+                                <div>
+                                    <label className="text-sm font-medium text-slate-600 dark:text-slate-300 mb-1.5 block">Address</label>
+                                    <textarea
+                                        className="w-full rounded-xl border border-slate-200 bg-white/50 px-4 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-800"
+                                        rows={2}
+                                        value={newParent.address}
+                                        onChange={(e) => setNewParent({ ...newParent, address: e.target.value })}
+                                    />
+                                </div>
+                            </div>
+                            <div className="flex justify-end gap-3 mt-6">
+                                <Button variant="outline" onClick={() => setShowAddParentModal(false)}>Cancel</Button>
+                                <Button onClick={handleCreateParent}>Create Account</Button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* Manage Linked Students Modal */}
+                {showLinkStudentModal && selectedParent && (
+                    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                        <div className="bg-white dark:bg-slate-900 rounded-2xl w-full max-w-2xl p-6 shadow-2xl border border-slate-200 dark:border-slate-800">
+                            <div className="flex justify-between items-center mb-6">
+                                <div>
+                                    <h3 className="text-xl font-bold">Manage Students for {selectedParent.name}</h3>
+                                    <p className="text-sm text-slate-500">Link children to this parent account</p>
+                                </div>
+                                <button onClick={() => setShowLinkStudentModal(false)} className="text-slate-400 hover:text-slate-600"><X size={24} /></button>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                {/* Link New Student */}
+                                <div className="space-y-4">
+                                    <h4 className="font-bold text-sm uppercase tracking-wider text-slate-400">Link New Student</h4>
+                                    <div>
+                                        <label className="text-sm font-medium mb-1.5 block">Select Student</label>
+                                        <select
+                                            className="w-full rounded-xl border border-slate-200 bg-white/50 px-4 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-800"
+                                            value={linkStudentForm.student_id}
+                                            onChange={(e) => setLinkStudentForm({ ...linkStudentForm, student_id: e.target.value })}
+                                        >
+                                            <option value="">- Choose Student -</option>
+                                            {students.map(s => (
+                                                <option key={s.id} value={s.id}>{s.name} ({s.admission_no})</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                    <div>
+                                        <label className="text-sm font-medium mb-1.5 block">Relationship</label>
+                                        <select
+                                            className="w-full rounded-xl border border-slate-200 bg-white/50 px-4 py-2.5 text-sm outline-none dark:border-slate-700 dark:bg-slate-800"
+                                            value={linkStudentForm.relationship}
+                                            onChange={(e) => setLinkStudentForm({ ...linkStudentForm, relationship: e.target.value })}
+                                        >
+                                            <option value="father">Father</option>
+                                            <option value="mother">Mother</option>
+                                            <option value="guardian">Guardian</option>
+                                            <option value="other">Other</option>
+                                        </select>
+                                    </div>
+                                    <Button className="w-full" onClick={handleLinkStudent}>Link Student</Button>
+                                </div>
+
+                                {/* Current Links */}
+                                <div className="space-y-4">
+                                    <h4 className="font-bold text-sm uppercase tracking-wider text-slate-400">Currently Linked</h4>
+                                    <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2">
+                                        {selectedParent.linked_students?.map((s: any) => (
+                                            <div key={s.id} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700">
+                                                <div>
+                                                    <div className="font-bold text-sm">{s.name}</div>
+                                                    <div className="text-xs text-slate-500 uppercase">{s.relationship} • {s.grade}-{s.section}</div>
+                                                </div>
+                                                <button
+                                                    onClick={() => handleUnlinkStudent(selectedParent.id, s.id)}
+                                                    className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                                                >
+                                                    <X size={16} />
+                                                </button>
+                                            </div>
+                                        ))}
+                                        {(!selectedParent.linked_students || selectedParent.linked_students.length === 0) && (
+                                            <div className="text-center py-8 bg-slate-50 dark:bg-slate-800 rounded-xl border border-dashed border-slate-200 dark:border-slate-700 text-slate-400 text-sm">
+                                                No students linked yet
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </div>
         );
     }

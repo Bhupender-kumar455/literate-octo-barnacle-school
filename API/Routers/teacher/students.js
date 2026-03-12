@@ -68,30 +68,9 @@ router.get('/', async (req, res) => {
       return res.json(classTeacherMapped.recordset);
     }
 
-    // Fallback 2: all students from teacher's school.
-    const schoolMapped = await pool.request()
-      .input('school_id', sql.BigInt, schoolId)
-      .query(`
-        SELECT 
-          s.id,
-          s.school_id,
-          s.class_id,
-          s.admission_no,
-          s.roll_number,
-          s.name,
-          s.gender,
-          s.dob,
-          s.guardian_name,
-          s.guardian_phone,
-          c.grade,
-          c.section
-        FROM students s
-        JOIN classes c ON c.id = s.class_id
-        WHERE s.school_id = @school_id
-        ORDER BY c.grade, c.section, s.roll_number
-      `);
-
-    res.json(schoolMapped.recordset);
+    // No assignment found for this teacher.
+    // Return empty to keep "My Students" consistent with Parent Chat visibility.
+    res.json([]);
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

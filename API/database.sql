@@ -27,13 +27,14 @@ BEGIN
         id BIGINT IDENTITY PRIMARY KEY,
         email VARCHAR(255) NOT NULL UNIQUE,
         password_hash VARCHAR(255) NOT NULL,
-        role VARCHAR(20) CHECK (role IN ('superadmin','admin','teacher','student')) NOT NULL,
+        role VARCHAR(20) NOT NULL,
         name VARCHAR(255) NOT NULL,
         phone VARCHAR(50),
         is_active BIT DEFAULT 1,
         created_at DATETIME DEFAULT GETDATE(),
         updated_at DATETIME DEFAULT GETDATE(),
-        CONSTRAINT chk_email CHECK (email LIKE '%@%.%')
+        CONSTRAINT chk_email CHECK (email LIKE '%@%.%'),
+        CONSTRAINT CK_users_role CHECK (role IN ('superadmin','admin','teacher','student','parent'))
     );
     PRINT 'users created';
 END
@@ -480,6 +481,57 @@ BEGIN
     PRINT 'notifications created';
 END
 
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'chat_conversations')
+BEGIN
+    CREATE TABLE chat_conversations (
+        id BIGINT IDENTITY PRIMARY KEY,
+        school_id BIGINT NOT NULL,
+        parent_user_id BIGINT NULL,
+        teacher_id BIGINT NOT NULL,
+        student_id BIGINT NOT NULL,
+        guardian_name NVARCHAR(255) NULL,
+        guardian_phone VARCHAR(50) NULL,
+        created_by BIGINT NULL,
+        created_at DATETIME DEFAULT GETDATE(),
+        updated_at DATETIME DEFAULT GETDATE(),
+        CONSTRAINT UQ_chat_conversations UNIQUE (school_id, parent_user_id, teacher_id, student_id),
+        CONSTRAINT CK_chat_conversations_parent_target CHECK (
+            parent_user_id IS NOT NULL
+            OR NULLIF(LTRIM(RTRIM(guardian_phone)), '') IS NOT NULL
+        ),
+        FOREIGN KEY (school_id) REFERENCES schools(id),
+        FOREIGN KEY (parent_user_id) REFERENCES users(id),
+        FOREIGN KEY (teacher_id) REFERENCES teachers(id),
+        FOREIGN KEY (student_id) REFERENCES students(id),
+        FOREIGN KEY (created_by) REFERENCES users(id)
+    );
+    PRINT 'chat_conversations created';
+END
+
+IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'chat_messages')
+BEGIN
+    CREATE TABLE chat_messages (
+        id BIGINT IDENTITY PRIMARY KEY,
+        conversation_id BIGINT NOT NULL,
+        school_id BIGINT NOT NULL,
+        sender_user_id BIGINT NOT NULL,
+        sender_role VARCHAR(20) NOT NULL CHECK (sender_role IN ('parent','teacher')),
+        message_type VARCHAR(20) NOT NULL CHECK (message_type IN ('text','file')),
+        message_text NVARCHAR(MAX) NULL,
+        file_url NVARCHAR(500) NULL,
+        file_name NVARCHAR(255) NULL,
+        file_mime_type VARCHAR(255) NULL,
+        file_size_bytes BIGINT NULL,
+        read_at DATETIME NULL,
+        deleted_at DATETIME NULL,
+        created_at DATETIME DEFAULT GETDATE(),
+        FOREIGN KEY (conversation_id) REFERENCES chat_conversations(id),
+        FOREIGN KEY (school_id) REFERENCES schools(id),
+        FOREIGN KEY (sender_user_id) REFERENCES users(id)
+    );
+    PRINT 'chat_messages created';
+END
+
 IF EXISTS (SELECT * FROM sys.tables WHERE name = 'notifications')
 BEGIN
     IF COL_LENGTH('notifications', 'attempts') IS NULL
@@ -498,6 +550,24 @@ END
 
 IF EXISTS (SELECT * FROM sys.tables WHERE name = 'users')
 BEGIN
+    DECLARE @dropRoleChecksSql NVARCHAR(MAX) = N'';
+    SELECT @dropRoleChecksSql = @dropRoleChecksSql + N'ALTER TABLE users DROP CONSTRAINT [' + cc.name + N'];'
+    FROM sys.check_constraints cc
+    WHERE cc.parent_object_id = OBJECT_ID('users')
+      AND cc.definition LIKE '%role%';
+
+    IF LEN(@dropRoleChecksSql) > 0
+        EXEC sp_executesql @dropRoleChecksSql;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM sys.check_constraints
+        WHERE parent_object_id = OBJECT_ID('users')
+          AND name = 'CK_users_role'
+    )
+        ALTER TABLE users
+        ADD CONSTRAINT CK_users_role CHECK (role IN ('superadmin','admin','teacher','student','parent'));
+
     IF EXISTS (
         SELECT 1
         FROM INFORMATION_SCHEMA.COLUMNS
@@ -524,6 +594,43 @@ BEGIN
         WHERE TABLE_NAME = 'students' AND COLUMN_NAME = 'guardian_phone' AND CHARACTER_MAXIMUM_LENGTH < 50
     )
         ALTER TABLE students ALTER COLUMN guardian_phone VARCHAR(50) NULL;
+END
+
+IF EXISTS (SELECT * FROM sys.tables WHERE name = 'chat_conversations')
+BEGIN
+    IF COL_LENGTH('chat_conversations', 'guardian_name') IS NULL
+        ALTER TABLE chat_conversations ADD guardian_name NVARCHAR(255) NULL;
+    IF COL_LENGTH('chat_conversations', 'guardian_phone') IS NULL
+        ALTER TABLE chat_conversations ADD guardian_phone VARCHAR(50) NULL;
+
+    IF EXISTS (
+        SELECT 1
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_NAME = 'chat_conversations'
+          AND COLUMN_NAME = 'parent_user_id'
+          AND IS_NULLABLE = 'NO'
+    )
+        ALTER TABLE chat_conversations ALTER COLUMN parent_user_id BIGINT NULL;
+
+    IF EXISTS (
+        SELECT 1
+        FROM sys.check_constraints
+        WHERE parent_object_id = OBJECT_ID('chat_conversations')
+          AND name = 'CK_chat_conversations_parent_target'
+    )
+        ALTER TABLE chat_conversations DROP CONSTRAINT CK_chat_conversations_parent_target;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM sys.check_constraints
+        WHERE parent_object_id = OBJECT_ID('chat_conversations')
+          AND name = 'CK_chat_conversations_parent_target'
+    )
+        ALTER TABLE chat_conversations
+        ADD CONSTRAINT CK_chat_conversations_parent_target CHECK (
+            parent_user_id IS NOT NULL
+            OR NULLIF(LTRIM(RTRIM(guardian_phone)), '') IS NOT NULL
+        );
 END
 
 -- ===================================
@@ -561,6 +668,18 @@ IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_notifications_student_
     CREATE INDEX IX_notifications_student_inapp ON notifications(school_id, recipient_type, recipient_id, channel, status, created_at);
 IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_student_users_school')
     CREATE INDEX IX_student_users_school ON student_users(school_id, student_id);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_chat_conversations_parent')
+    CREATE INDEX IX_chat_conversations_parent ON chat_conversations(parent_user_id, school_id, updated_at);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_chat_conversations_teacher')
+    CREATE INDEX IX_chat_conversations_teacher ON chat_conversations(teacher_id, school_id, updated_at);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_chat_conversations_student')
+    CREATE INDEX IX_chat_conversations_student ON chat_conversations(student_id, school_id);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_chat_conversations_guardian_phone')
+    CREATE INDEX IX_chat_conversations_guardian_phone ON chat_conversations(guardian_phone, school_id, updated_at);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_chat_messages_conversation')
+    CREATE INDEX IX_chat_messages_conversation ON chat_messages(conversation_id, created_at);
+IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_chat_messages_sender')
+    CREATE INDEX IX_chat_messages_sender ON chat_messages(sender_user_id, created_at);
 
 IF COL_LENGTH('students', 'logo') IS NULL
     ALTER TABLE students ADD logo NVARCHAR(MAX) NULL;

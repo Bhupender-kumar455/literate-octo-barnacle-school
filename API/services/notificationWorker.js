@@ -1,5 +1,6 @@
 const nodemailer = require('nodemailer');
 const { poolPromise, sql } = require('../config/db');
+const { sendWhatsAppMessage } = require('./whatsappProvider');
 
 let intervalHandle = null;
 let cycleInProgress = false;
@@ -241,19 +242,22 @@ const dispatchNotification = async (notification, recipients, config) => {
     if (!recipients.phones.length) {
       throw new Error('No recipient phone resolved for WhatsApp notification');
     }
-    const endpoint = process.env.WHATSAPP_WEBHOOK_URL || '';
-    const token = process.env.WHATSAPP_WEBHOOK_TOKEN || '';
+    const providerMessageIds = [];
     for (const phone of recipients.phones) {
-      await postToProvider(endpoint, token, {
-        channel: 'whatsapp',
+      const providerResult = await sendWhatsAppMessage({
         to: phone,
         title: notification.title || null,
         message: notification.message,
-        notification_id: notification.id,
+        notificationId: notification.id,
         metadata,
-      }, config.providerTimeoutMs);
+        timeoutMs: config.providerTimeoutMs,
+      });
+
+      if (providerResult?.providerMessageId) {
+        providerMessageIds.push(String(providerResult.providerMessageId));
+      }
     }
-    return { providerMessageId: `whatsapp:${Date.now()}` };
+    return { providerMessageId: providerMessageIds[0] || `whatsapp:${Date.now()}` };
   }
 
   throw new Error(`Unsupported notification channel: ${notification.channel}`);

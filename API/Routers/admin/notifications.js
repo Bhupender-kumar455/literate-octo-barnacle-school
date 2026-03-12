@@ -4,6 +4,7 @@ const { poolPromise, sql } = require('../../config/db');
 const { protect, restrictTo } = require('../../middleware/auth');
 const { audit } = require('../../middleware/audit');
 const { runNotificationDeliveryCycle } = require('../../services/notificationWorker');
+const { queueNotificationForEvent, resolveEventChannels } = require('../../services/notificationQueue');
 
 router.use(protect, restrictTo('admin'));
 
@@ -381,42 +382,67 @@ router.post('/trigger/fees-due', audit('queue_fee_due_notifications', 'notificat
 
   try {
     const pool = await poolPromise;
-    const result = await pool.request()
+    const dueInvoicesResult = await pool.request()
       .input('school_id', sql.BigInt, req.user.school_id)
       .input('days_ahead', sql.Int, daysAhead)
-      .input('created_by', sql.BigInt, req.user.id)
       .query(`
-        INSERT INTO notifications
-        (school_id, recipient_type, recipient_id, channel, title, message, status, metadata, entity_type, entity_id, created_by)
         SELECT
-          fi.school_id,
-          'student',
-          fi.student_id,
-          'in_app',
-          'Fee Due Reminder',
-          CONCAT('Fee invoice #', fi.id, ' of ', CAST(fi.amount AS VARCHAR(50)), ' is due on ', CONVERT(VARCHAR(10), fi.due_date, 120)),
-          'queued',
-          CONCAT('{"invoice_id":', fi.id, ',"amount":', fi.amount, ',"due_date":"', CONVERT(VARCHAR(10), fi.due_date, 120), '"}'),
-          'fees_invoice',
           fi.id,
-          @created_by
+          fi.student_id,
+          fi.amount,
+          fi.due_date,
+          fi.status
         FROM fees_invoices fi
         WHERE fi.school_id = @school_id
           AND fi.status IN ('pending', 'overdue')
           AND fi.due_date IS NOT NULL
           AND fi.due_date <= DATEADD(DAY, @days_ahead, CAST(GETDATE() AS DATE))
-          AND NOT EXISTS (
-            SELECT 1
-            FROM notifications n
-            WHERE n.school_id = fi.school_id
-              AND n.entity_type = 'fees_invoice'
-              AND n.entity_id = fi.id
-              AND CAST(n.created_at AS DATE) = CAST(GETDATE() AS DATE)
-          )
       `);
 
-    const queued = Array.isArray(result.rowsAffected) ? (result.rowsAffected[0] || 0) : 0;
-    res.json({ message: 'Fee reminders queued', queued });
+    const eventChannels = resolveEventChannels('fee_reminder', ['in_app', 'whatsapp']);
+    let queued = 0;
+    let skipped = 0;
+
+    for (const invoice of dueInvoicesResult.recordset) {
+      const dueDateText = invoice.due_date
+        ? new Date(invoice.due_date).toISOString().slice(0, 10)
+        : 'N/A';
+      const queueResult = await queueNotificationForEvent({
+        eventKey: 'fee_reminder',
+        fallbackChannels: ['in_app', 'whatsapp'],
+        schoolId: req.user.school_id,
+        recipientType: 'student',
+        recipientId: invoice.student_id,
+        title: 'Fee Due Reminder',
+        message: `Fee invoice #${invoice.id} of ${invoice.amount} is due on ${dueDateText}.`,
+        metadata: {
+          alert_type: 'fee_due',
+          invoice_id: Number(invoice.id),
+          amount: Number(invoice.amount),
+          due_date: dueDateText,
+          status: String(invoice.status || '').toLowerCase(),
+        },
+        entityType: 'fees_invoice',
+        entityId: invoice.id,
+        createdBy: req.user.id,
+        dedupe: {
+          perDay: true,
+          byEntity: true,
+          byTitle: true,
+        },
+      });
+
+      queued += queueResult.queuedIds.length;
+      skipped += queueResult.skipped.length;
+    }
+
+    res.json({
+      message: 'Fee reminders queued',
+      invoices_considered: dueInvoicesResult.recordset.length,
+      channels: eventChannels,
+      queued,
+      skipped,
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

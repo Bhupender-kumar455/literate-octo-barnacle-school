@@ -53,8 +53,6 @@ router.post('/login', async (req, res) => {
             validPassword = false;
         }
 
-        // Backward compatibility: some legacy rows stored plain text in password_hash.
-        // If that matches, authenticate and upgrade immediately to bcrypt.
         if (!validPassword && user.password_hash === password) {
             validPassword = true;
             const upgradedHash = await bcrypt.hash(password, 10);
@@ -97,6 +95,10 @@ router.get('/me', protect, async (req, res) => {
             .query('SELECT id, name, email, role FROM users WHERE id = @id');
         if (!result.recordset.length) return res.status(404).json({ message: 'User not found' });
         const user = result.recordset[0];
+
+        if (user.role === 'parent') {
+            return res.status(403).json({ message: 'Parent login is no longer supported' });
+        }
 
         let school_id = null;
         if (user.role === 'admin') {

@@ -135,6 +135,49 @@ export interface NotificationItem {
   updated_at?: string;
 }
 
+export interface ChatConversation {
+  id: string | number;
+  school_id: string | number;
+  parent_user_id: string | number | null;
+  teacher_id: string | number;
+  teacher_user_id?: string | number;
+  student_id: string | number;
+  student_name?: string;
+  grade?: string;
+  section?: string;
+  parent_name?: string;
+  parent_phone?: string;
+  teacher_name?: string;
+  teacher_phone?: string;
+  unread_count?: number;
+  last_message_id?: string | number | null;
+  last_message_type?: "text" | "file" | string | null;
+  last_message_text?: string | null;
+  last_message_file_url?: string | null;
+  last_message_file_name?: string | null;
+  last_message_sender_role?: "parent" | "teacher" | string | null;
+  last_message_created_at?: string | null;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface ChatMessage {
+  id: string | number;
+  conversation_id: string | number;
+  school_id: string | number;
+  sender_user_id: string | number;
+  sender_role: "parent" | "teacher" | string;
+  sender_name?: string;
+  message_type: "text" | "file" | string;
+  message_text?: string | null;
+  file_url?: string | null;
+  file_name?: string | null;
+  file_mime_type?: string | null;
+  file_size_bytes?: number | null;
+  read_at?: string | null;
+  created_at?: string;
+}
+
 export interface ReportCardSubject {
   subject: string;
   term: string;
@@ -173,3 +216,4 @@ export interface NavItem {
   icon: any;
   view: string;
 }
+

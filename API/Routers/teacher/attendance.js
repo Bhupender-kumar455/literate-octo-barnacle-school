@@ -3,6 +3,7 @@ const router = express.Router();
 const { protect, restrictTo } = require('../../middleware/auth');
 const { poolPromise, sql } = require('../../config/db');
 const { audit } = require('../../middleware/audit');
+const { queueNotificationForEvent } = require('../../services/notificationQueue');
 
 router.use(protect, restrictTo('teacher'));
 
@@ -18,6 +19,72 @@ const parseOptionalId = (value) => {
     const parsed = Number(value);
     if (!Number.isInteger(parsed) || parsed <= 0) return null;
     return parsed;
+};
+
+const ATTENDANCE_ALLOWED_STATUSES = new Set(['absent', 'late', 'half_day']);
+const parsedAttendanceAlertStatuses = new Set(
+    String(process.env.ATTENDANCE_ALERT_STATUSES || 'absent,late,half_day')
+        .split(',')
+        .map((value) => String(value || '').trim().toLowerCase())
+        .filter((value) => ATTENDANCE_ALLOWED_STATUSES.has(value))
+);
+const ATTENDANCE_ALERT_STATUSES = parsedAttendanceAlertStatuses.size
+    ? parsedAttendanceAlertStatuses
+    : ATTENDANCE_ALLOWED_STATUSES;
+
+const toStatusLabel = (status) => String(status || '')
+    .trim()
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const formatDateText = (value) => {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return String(value || '');
+    return parsed.toISOString().slice(0, 10);
+};
+
+const queueAttendanceAlert = async ({
+    schoolId,
+    studentId,
+    status,
+    date,
+    classSubjectId,
+    remarks,
+    createdBy
+}) => {
+    const normalizedStatus = String(status || '').toLowerCase();
+    if (!ATTENDANCE_ALERT_STATUSES.has(normalizedStatus)) {
+        return { queuedIds: [], skipped: [] };
+    }
+
+    const dateText = formatDateText(date);
+    const statusLabel = toStatusLabel(normalizedStatus);
+    const message = `Attendance alert: Marked ${statusLabel} on ${dateText}.${remarks ? ` Remarks: ${remarks}` : ''}`;
+
+    return queueNotificationForEvent({
+        eventKey: 'attendance_alert',
+        fallbackChannels: ['in_app', 'whatsapp'],
+        schoolId,
+        recipientType: 'student',
+        recipientId: studentId,
+        title: `Attendance ${statusLabel}`,
+        message,
+        metadata: {
+            alert_type: 'attendance_alert',
+            status: normalizedStatus,
+            date: dateText,
+            class_subject_id: classSubjectId || null,
+            remarks: remarks || null
+        },
+        entityType: `attendance_${normalizedStatus}`,
+        entityId: studentId,
+        createdBy,
+        dedupe: {
+            perDay: true,
+            byEntity: true,
+            byTitle: true
+        }
+    });
 };
 
 const getTeacherContext = async (pool, userId) => {
@@ -122,9 +189,31 @@ router.post('/mark', audit('mark_attendance', 'attendance'), async (req, res) =>
         BEGIN
           INSERT INTO attendance (student_id, [date], status, class_subject_id, marked_by, remarks)
           VALUES (@student_id, @date, @status, @class_subject_id, @marked_by, @remarks)
-        END
+                END
       `);
-        res.json({ message: 'Attendance marked' });
+        let notificationSummary = { queued: 0, skipped: 0 };
+        try {
+            const queueResult = await queueAttendanceAlert({
+                schoolId: teacherContext.schoolId,
+                studentId,
+                status: normalizedStatus,
+                date,
+                classSubjectId,
+                remarks,
+                createdBy: req.user.id
+            });
+            notificationSummary = {
+                queued: queueResult.queuedIds.length,
+                skipped: queueResult.skipped.length
+            };
+        } catch (notificationErr) {
+            console.error('Attendance alert queue error:', notificationErr.message);
+        }
+
+        res.json({
+            message: 'Attendance marked',
+            notifications: notificationSummary
+        });
     } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
@@ -212,7 +301,31 @@ router.post('/bulk', audit('mark_attendance_bulk', 'attendance'), async (req, re
         }
 
         await transaction.commit();
-        res.json({ message: 'Attendance submitted' });
+
+        let queued = 0;
+        let skipped = 0;
+        for (const rec of parsedRecords) {
+            try {
+                const queueResult = await queueAttendanceAlert({
+                    schoolId: teacherContext.schoolId,
+                    studentId: rec.student_id,
+                    status: rec.status,
+                    date,
+                    classSubjectId: rec.class_subject_id,
+                    remarks: rec.remarks,
+                    createdBy: req.user.id
+                });
+                queued += queueResult.queuedIds.length;
+                skipped += queueResult.skipped.length;
+            } catch (notificationErr) {
+                console.error('Attendance bulk alert queue error:', notificationErr.message);
+            }
+        }
+
+        res.json({
+            message: 'Attendance submitted',
+            notifications: { queued, skipped }
+        });
     } catch (err) {
         if (transaction) await transaction.rollback();
         res.status(500).json({ message: err.message });

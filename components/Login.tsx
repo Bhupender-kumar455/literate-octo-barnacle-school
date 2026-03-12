@@ -38,7 +38,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, isDark, toggleTheme }) => {
   return (
     <div className="min-h-screen w-full bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-indigo-400 via-slate-900 to-black flex items-center justify-center p-4">
       <div className="w-full max-w-4xl flex rounded-3xl overflow-hidden shadow-2xl bg-white dark:bg-slate-900">
-        {/* Left: Brand Side */}
         <div className="hidden md:flex w-1/2 bg-indigo-600 p-12 flex-col justify-between relative overflow-hidden">
           <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1523050854058-8df90110c9f1?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center opacity-20 mix-blend-overlay"></div>
           <div className="relative z-10">
@@ -46,13 +45,10 @@ const Login: React.FC<LoginProps> = ({ onLogin, isDark, toggleTheme }) => {
               <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center text-indigo-600 font-bold text-2xl">
                 S
               </div>
-              <h1 className="text-2xl font-bold text-white tracking-wide">
-                SchoolSystema
-              </h1>
+              <h1 className="text-2xl font-bold text-white tracking-wide">SchoolSystema</h1>
             </div>
             <p className="text-indigo-100 text-lg font-light">
-              The premium all-in-one management solution for modern educational
-              institutions.
+              The premium all-in-one management solution for modern educational institutions.
             </p>
           </div>
           <div className="relative z-10 space-y-4">
@@ -77,7 +73,6 @@ const Login: React.FC<LoginProps> = ({ onLogin, isDark, toggleTheme }) => {
           </div>
         </div>
 
-        {/* Right: Login Form */}
         <div className="w-full md:w-1/2 p-8 md:p-12 bg-white dark:bg-slate-950 flex flex-col justify-center relative">
           {toggleTheme && (
             <button
@@ -90,12 +85,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, isDark, toggleTheme }) => {
           )}
 
           <div className="mb-8 text-center md:text-left">
-            <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-2">
-              Welcome back
-            </h2>
-            <p className="text-slate-500">
-              Please choose your portal to continue
-            </p>
+            <h2 className="text-3xl font-bold text-slate-900 dark:text-white mb-2">Welcome back</h2>
+            <p className="text-slate-500">Please choose your portal to continue</p>
           </div>
 
           {!selectedRole ? (
@@ -108,12 +99,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, isDark, toggleTheme }) => {
                   <Shield size={24} />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-slate-900 dark:text-white">
-                    Super Admin
-                  </h3>
-                  <p className="text-sm text-slate-500">
-                    System owners and management
-                  </p>
+                  <h3 className="font-semibold text-slate-900 dark:text-white">Super Admin</h3>
+                  <p className="text-sm text-slate-500">System owners and management</p>
                 </div>
               </button>
 
@@ -125,12 +112,8 @@ const Login: React.FC<LoginProps> = ({ onLogin, isDark, toggleTheme }) => {
                   <User size={24} />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-slate-900 dark:text-white">
-                    Principal / Admin
-                  </h3>
-                  <p className="text-sm text-slate-500">
-                    School administration
-                  </p>
+                  <h3 className="font-semibold text-slate-900 dark:text-white">Principal / Admin</h3>
+                  <p className="text-sm text-slate-500">School administration</p>
                 </div>
               </button>
 
@@ -142,9 +125,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, isDark, toggleTheme }) => {
                   <GraduationCap size={24} />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-slate-900 dark:text-white">
-                    Teacher
-                  </h3>
+                  <h3 className="font-semibold text-slate-900 dark:text-white">Teacher</h3>
                   <p className="text-sm text-slate-500">Classroom management</p>
                 </div>
               </button>
@@ -157,24 +138,16 @@ const Login: React.FC<LoginProps> = ({ onLogin, isDark, toggleTheme }) => {
                   <BookOpen size={24} />
                 </div>
                 <div>
-                  <h3 className="font-semibold text-slate-900 dark:text-white">
-                    Student
-                  </h3>
+                  <h3 className="font-semibold text-slate-900 dark:text-white">Student</h3>
                   <p className="text-sm text-slate-500">Personal learning portal</p>
                 </div>
               </button>
             </div>
           ) : (
-            <form
-              onSubmit={handleLogin}
-              className="space-y-5 animate-in fade-in slide-in-from-right-8 duration-500"
-            >
+            <form onSubmit={handleLogin} className="space-y-5 animate-in fade-in slide-in-from-right-8 duration-500">
               <div className="flex items-center justify-between mb-4">
                 <Badge variant="outline">
-                  Logging in as:{" "}
-                  <span className="capitalize font-bold">
-                    {selectedRole.replace("_", " ")}
-                  </span>
+                  Logging in as: <span className="capitalize font-bold">{selectedRole.replace("_", " ")}</span>
                 </Badge>
                 <button
                   type="button"
@@ -186,10 +159,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, isDark, toggleTheme }) => {
               </div>
 
               <div className="relative">
-                <Mail
-                  className="absolute left-4 top-3 text-slate-400"
-                  size={20}
-                />
+                <Mail className="absolute left-4 top-3 text-slate-400" size={20} />
                 <input
                   type="email"
                   value={email}
@@ -200,10 +170,7 @@ const Login: React.FC<LoginProps> = ({ onLogin, isDark, toggleTheme }) => {
               </div>
 
               <div className="relative">
-                <Lock
-                  className="absolute left-4 top-3 text-slate-400"
-                  size={20}
-                />
+                <Lock className="absolute left-4 top-3 text-slate-400" size={20} />
                 <input
                   type="password"
                   value={password}
@@ -221,29 +188,19 @@ const Login: React.FC<LoginProps> = ({ onLogin, isDark, toggleTheme }) => {
                   />
                   Remember me
                 </label>
-                <a
-                  href="#"
-                  className="text-indigo-600 font-medium hover:underline"
-                >
+                <a href="#" className="text-indigo-600 font-medium hover:underline">
                   Forgot password?
                 </a>
               </div>
 
-              <Button
-                className="w-full py-3 text-lg shadow-indigo-500/30"
-                type="submit"
-                disabled={!email}
-              >
+              <Button className="w-full py-3 text-lg shadow-indigo-500/30" type="submit" disabled={!email}>
                 Sign In <ArrowRight size={18} />
               </Button>
             </form>
           )}
 
           <p className="mt-8 text-center text-sm text-slate-400">
-            Don't have an account?{" "}
-            <a href="#" className="text-indigo-600 font-medium hover:underline">
-              Contact Sales
-            </a>
+            Don't have an account? <a href="#" className="text-indigo-600 font-medium hover:underline">Contact Sales</a>
           </p>
         </div>
       </div>

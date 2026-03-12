@@ -15,24 +15,28 @@ const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [isDark, setIsDark] = useState(false);
 
-  // Auth Check
   useEffect(() => {
-    const savedTheme = localStorage.getItem('schoolSystemaTheme');
-    const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const savedTheme = localStorage.getItem("schoolSystemaTheme");
+    const systemPrefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
 
-    if (savedTheme === 'dark' || (!savedTheme && systemPrefersDark)) {
+    if (savedTheme === "dark" || (!savedTheme && systemPrefersDark)) {
       setIsDark(true);
-      document.documentElement.classList.add('dark');
+      document.documentElement.classList.add("dark");
     } else {
       setIsDark(false);
-      document.documentElement.classList.remove('dark');
+      document.documentElement.classList.remove("dark");
     }
+
     const token = localStorage.getItem("token");
     if (token) {
       (async () => {
         try {
           const res = await getCurrentUser();
           if (res?.user) {
+            if (res.user.role === "parent") {
+              throw new Error("Parent login is no longer supported");
+            }
+
             setUser({
               id: String(res.user.id),
               name: res.user.name,
@@ -55,29 +59,25 @@ const App: React.FC = () => {
 
   const toggleTheme = () => {
     if (isDark) {
-      document.documentElement.classList.remove('dark');
-      localStorage.setItem('schoolSystemaTheme', 'light');
+      document.documentElement.classList.remove("dark");
+      localStorage.setItem("schoolSystemaTheme", "light");
       setIsDark(false);
     } else {
-      document.documentElement.classList.add('dark');
-      localStorage.setItem('schoolSystemaTheme', 'dark');
+      document.documentElement.classList.add("dark");
+      localStorage.setItem("schoolSystemaTheme", "dark");
       setIsDark(true);
     }
   };
 
-  const handleLogin = async (
-    role: UserRole,
-    email: string,
-    password: string
-  ) => {
+  const handleLogin = async (role: UserRole, email: string, password: string) => {
     setLoading(true);
     try {
       const response = await login(email, password, role.toLowerCase());
+      if (response.user.role === "parent") {
+        throw new Error("Parent login is no longer supported");
+      }
 
-      // Save token
       localStorage.setItem("token", response.token);
-
-      // Save user
       setUser({
         id: response.user.id,
         name: response.user.name,
@@ -91,9 +91,7 @@ const App: React.FC = () => {
       setCurrentView("dashboard");
       toast.success(`Welcome back, ${response.user.name}!`);
     } catch (err: any) {
-      toast.error(
-        err.response?.data?.message || "Login failed. Please try again."
-      );
+      toast.error(err.response?.data?.message || err.message || "Login failed. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -120,7 +118,7 @@ const App: React.FC = () => {
   if (!user) {
     return (
       <>
-        <Toaster position="top-right" richColors theme={isDark ? 'dark' : 'light'} />
+        <Toaster position="top-right" richColors theme={isDark ? "dark" : "light"} />
         <Login onLogin={handleLogin} isDark={isDark} toggleTheme={toggleTheme} />
       </>
     );
@@ -128,7 +126,7 @@ const App: React.FC = () => {
 
   return (
     <>
-      <Toaster position="top-right" richColors theme={isDark ? 'dark' : 'light'} />
+      <Toaster position="top-right" richColors theme={isDark ? "dark" : "light"} />
       <Layout
         user={user}
         onLogout={handleLogout}
@@ -137,18 +135,12 @@ const App: React.FC = () => {
         isDark={isDark}
         toggleTheme={toggleTheme}
       >
-        {user.role === UserRole.SUPER_ADMIN && (
-          <SuperAdminView currentView={currentView} />
-        )}
+        {user.role === UserRole.SUPER_ADMIN && <SuperAdminView currentView={currentView} />}
         {user.role === UserRole.ADMIN && (
           <AdminView currentView={currentView} user={user} onChangeView={setCurrentView} />
         )}
-        {user.role === UserRole.TEACHER && (
-          <TeacherView currentView={currentView} user={user} />
-        )}
-        {user.role === UserRole.STUDENT && (
-          <StudentView currentView={currentView} user={user} />
-        )}
+        {user.role === UserRole.TEACHER && <TeacherView currentView={currentView} user={user} />}
+        {user.role === UserRole.STUDENT && <StudentView currentView={currentView} user={user} />}
       </Layout>
     </>
   );

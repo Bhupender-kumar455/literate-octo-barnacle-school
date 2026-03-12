@@ -18,6 +18,7 @@ import { Card, Button, Badge } from './UIComponents';
 import { toast } from 'sonner';
 import { Calendar, Clock, MapPin, CheckCircle, AlertCircle, Users, Save, FileText } from 'lucide-react';
 import { Student, User } from '../types';
+import ChatModule from './ChatModule';
 
 const TeacherView: React.FC<{ currentView: string; user: User }> = ({ currentView, user }) => {
   const [activeSession, setActiveSession] = useState<string | null>(null);
@@ -306,6 +307,10 @@ const TeacherView: React.FC<{ currentView: string; user: User }> = ({ currentVie
         </div>
       </div>
     );
+  }
+
+  if (currentView === 'chat') {
+    return <ChatModule user={user} />;
   }
 
   if (currentView === 'leaves') {

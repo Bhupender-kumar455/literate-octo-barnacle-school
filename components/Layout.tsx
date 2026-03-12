@@ -18,6 +18,7 @@ import {
   CreditCard,
   BarChart3,
   Megaphone,
+  MessageSquare,
   Sun,
   Moon,
   Calendar,
@@ -168,6 +169,7 @@ const Layout: React.FC<LayoutProps> = ({ user, children, onLogout, currentView, 
         { id: 'dashboard', label: 'My Schedule', icon: CalendarDays },
         { id: 'attendance', label: 'Take Attendance', icon: ClipboardCheck },
         { id: 'students', label: 'My Students', icon: Users },
+        { id: 'chat', label: 'Parent Chat', icon: MessageSquare },
         { id: 'assignments', label: 'Assignments', icon: BookOpen },
         { id: 'grades', label: 'Grades', icon: GraduationCap },
         { id: 'leaves', label: 'Leaves', icon: Calendar },
@@ -409,3 +411,4 @@ const Layout: React.FC<LayoutProps> = ({ user, children, onLogout, currentView, 
 };
 
 export default Layout;
+

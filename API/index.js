@@ -1,7 +1,9 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const http = require('http');
 const { startNotificationWorker, stopNotificationWorker } = require('./services/notificationWorker');
+const { attachChatSocketServer } = require('./services/chatSocket');
 const fs = require('fs');
 require('./config/env');
 
@@ -70,6 +72,7 @@ app.use('/api/admin/class-subjects', require('./Routers/admin/class-subjects'));
 app.use('/api/admin/schedule', require('./Routers/admin/schedule'));
 app.use('/api/admin/students', require('./Routers/admin/students'));
 app.use('/api/admin/students-bulk', require('./Routers/admin/students-bulk'));
+app.use('/api/admin/parents', require('./Routers/admin/parents'));
 app.use('/api/admin/teachers', require('./Routers/admin/teachers'));
 app.use('/api/admin/notifications', require('./Routers/admin/notifications'));
 app.use('/api/admin/leaves', require('./Routers/admin/leaves'));
@@ -84,19 +87,24 @@ app.use('/api/teacher/notifications', require('./Routers/teacher/notifications')
 app.use('/api/billing', require('./Routers/billing/stripe'));
 app.use('/api/superadmin/users', require('./Routers/superadmin/users'));
 app.use('/api/superadmin/audit', require('./Routers/superadmin/audit'));
+app.use('/api/chat', require('./Routers/chat'));
 
 app.use('/api/student/portal', require('./Routers/student/portal'));
 app.use('/api/auth', require('./Routers/Login'));
 
-app.listen(PORT, () => {
+const server = http.createServer(app);
+attachChatSocketServer(server, { allowedOrigins });
+
+server.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
   startNotificationWorker();
 });
 
 const shutdown = () => {
   stopNotificationWorker();
-  process.exit(0);
+  server.close(() => process.exit(0));
 };
 
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+

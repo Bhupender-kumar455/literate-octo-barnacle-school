@@ -4,6 +4,7 @@ const router = express.Router();
 const { poolPromise, sql } = require('../../config/db');
 const { protect, restrictTo } = require('../../middleware/auth');
 const { audit } = require('../../middleware/audit');
+const { queueNotificationForEvent } = require('../../services/notificationQueue');
 
 // RFC 4180 CSV cell escaping
 const csvEscape = (value) => {
@@ -223,23 +224,35 @@ router.post('/invoices/:id/reminder', audit('send_invoice_reminder', 'fees'), as
     }
 
     const dueDateText = invoice.due_date ? new Date(invoice.due_date).toISOString().slice(0, 10) : 'N/A';
-    await pool.request()
-      .input('school_id', sql.Int, req.user.school_id)
-      .input('recipient_id', sql.Int, invoice.student_id)
-      .input('title', sql.NVarChar(255), 'Fee Invoice Reminder')
-      .input('message', sql.NVarChar(sql.MAX), `Reminder: Invoice #${invoice.id} for ${invoice.amount} is ${invoice.status}. Due date: ${dueDateText}.`)
-      .input('scheduled_at', sql.DateTime, scheduledAtValue)
-      .input('entity_type', sql.VarChar(50), 'fees_invoice')
-      .input('entity_id', sql.Int, invoice.id)
-      .input('created_by', sql.Int, req.user.id)
-      .query(`
-        INSERT INTO notifications
-        (school_id, recipient_type, recipient_id, channel, title, message, status, scheduled_at, entity_type, entity_id, created_by)
-        VALUES
-        (@school_id, 'student', @recipient_id, 'in_app', @title, @message, 'queued', @scheduled_at, @entity_type, @entity_id, @created_by)
-      `);
+    const reminderTitle = 'Fee Invoice Reminder';
+    const reminderMessage = `Reminder: Invoice #${invoice.id} for ${invoice.amount} is ${invoice.status}. Due date: ${dueDateText}.`;
 
-    res.json({ message: 'Reminder queued successfully' });
+    const queued = await queueNotificationForEvent({
+      eventKey: 'fee_reminder',
+      fallbackChannels: ['in_app', 'whatsapp'],
+      schoolId: req.user.school_id,
+      recipientType: 'student',
+      recipientId: invoice.student_id,
+      title: reminderTitle,
+      message: reminderMessage,
+      scheduledAt: scheduledAtValue,
+      metadata: {
+        alert_type: 'fee_reminder',
+        invoice_id: Number(invoice.id),
+        amount: Number(invoice.amount),
+        due_date: dueDateText,
+        status: String(invoice.status || '').toLowerCase(),
+      },
+      entityType: 'fees_invoice',
+      entityId: invoice.id,
+      createdBy: req.user.id,
+    });
+
+    res.json({
+      message: 'Reminder queued successfully',
+      queued: queued.queuedIds.length,
+      skipped: queued.skipped.length,
+    });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -315,43 +328,48 @@ router.put('/invoices/:id/status', audit('update_invoice_status', 'fees'), async
       .input('id', sql.Int, id)
       .input('school_id', sql.Int, req.user.school_id)
       .input('status', sql.VarChar(20), normalizedStatus)
-      .query('UPDATE fees_invoices SET status = @status WHERE id = @id AND school_id = @school_id');
+      .query(`
+        UPDATE fees_invoices
+        SET status = @status
+        OUTPUT INSERTED.id, INSERTED.student_id, INSERTED.amount, INSERTED.due_date, INSERTED.status
+        WHERE id = @id AND school_id = @school_id
+      `);
 
     const affected = Array.isArray(result.rowsAffected) ? (result.rowsAffected[0] || 0) : 0;
     if (!affected) {
       return res.status(404).json({ message: 'Invoice not found for this school' });
     }
 
+    const updatedInvoice = result.recordset[0] || null;
     if (normalizedStatus === 'overdue') {
       try {
-        await pool.request()
-          .input('id', sql.Int, id)
-          .input('school_id', sql.Int, req.user.school_id)
-          .input('created_by', sql.Int, req.user.id)
-          .query(`
-            INSERT INTO notifications
-            (school_id, recipient_type, recipient_id, channel, title, message, status, entity_type, entity_id, created_by)
-            SELECT
-              fi.school_id,
-              'student',
-              fi.student_id,
-              'in_app',
-              'Invoice Overdue',
-              CONCAT('Invoice #', fi.id, ' is now overdue. Please clear dues at the earliest.'),
-              'queued',
-              'fees_invoice',
-              fi.id,
-              @created_by
-            FROM fees_invoices fi
-            WHERE fi.id = @id
-              AND fi.school_id = @school_id
-              AND NOT EXISTS (
-                SELECT 1 FROM notifications n
-                WHERE n.entity_type = 'fees_invoice'
-                  AND n.entity_id = fi.id
-                  AND n.title = 'Invoice Overdue'
-              )
-          `);
+        const dueDateText = updatedInvoice?.due_date
+          ? new Date(updatedInvoice.due_date).toISOString().slice(0, 10)
+          : 'N/A';
+
+        await queueNotificationForEvent({
+          eventKey: 'fee_reminder',
+          fallbackChannels: ['in_app', 'whatsapp'],
+          schoolId: req.user.school_id,
+          recipientType: 'student',
+          recipientId: updatedInvoice?.student_id,
+          title: 'Invoice Overdue',
+          message: `Invoice #${updatedInvoice?.id || id} is now overdue. Due date: ${dueDateText}. Please clear dues at the earliest.`,
+          metadata: {
+            alert_type: 'fee_overdue',
+            invoice_id: Number(updatedInvoice?.id || id),
+            due_date: dueDateText,
+            status: String(updatedInvoice?.status || normalizedStatus),
+          },
+          entityType: 'fees_invoice',
+          entityId: updatedInvoice?.id || id,
+          createdBy: req.user.id,
+          dedupe: {
+            perDay: true,
+            byEntity: true,
+            byTitle: true,
+          },
+        });
       } catch (notificationErr) {
         console.error('Overdue notification queue error:', notificationErr.message);
       }

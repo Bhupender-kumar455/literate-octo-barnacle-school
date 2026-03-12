@@ -3,6 +3,7 @@ const router = express.Router();
 const { poolPromise, sql } = require('../../config/db');
 const { protect, restrictTo } = require('../../middleware/auth');
 const { audit } = require('../../middleware/audit');
+const { queueNotificationForEvent } = require('../../services/notificationQueue');
 
 router.use(protect, restrictTo('admin'));
 
@@ -39,7 +40,7 @@ router.post('/', audit('create_grade', 'grade'), async (req, res) => {
       return res.status(400).json({ message: 'Invalid student for this school' });
     }
 
-    await pool.request()
+    const gradeInsert = await pool.request()
       .input('student_id', sql.Int, student_id)
       .input('subject', sql.VarChar(100), subject)
       .input('term', sql.VarChar(50), term)
@@ -47,8 +48,37 @@ router.post('/', audit('create_grade', 'grade'), async (req, res) => {
       .input('max_score', sql.Decimal(5, 2), max_score || 100)
       .query(`
         INSERT INTO grades (student_id, subject, term, score, max_score)
+        OUTPUT INSERTED.id, INSERTED.subject, INSERTED.term, INSERTED.score, INSERTED.max_score
         VALUES (@student_id, @subject, @term, @score, @max_score)
       `);
+
+    const grade = gradeInsert.recordset[0] || null;
+    if (grade?.id) {
+      try {
+        await queueNotificationForEvent({
+          eventKey: 'result_alert',
+          fallbackChannels: ['in_app', 'whatsapp'],
+          schoolId: req.user.school_id,
+          recipientType: 'student',
+          recipientId: student_id,
+          title: 'New Result Published',
+          message: `Result update: ${grade.subject} (${grade.term}) score is ${grade.score}/${grade.max_score}.`,
+          metadata: {
+            alert_type: 'result_alert',
+            grade_id: Number(grade.id),
+            subject: String(grade.subject || ''),
+            term: String(grade.term || ''),
+            score: Number(grade.score),
+            max_score: Number(grade.max_score),
+          },
+          entityType: 'grade',
+          entityId: grade.id,
+          createdBy: req.user.id,
+        });
+      } catch (notificationErr) {
+        console.error('Result notification queue error:', notificationErr.message);
+      }
+    }
     res.status(201).json({ message: 'Grade added' });
   } catch (err) {
     res.status(500).json({ message: err.message });

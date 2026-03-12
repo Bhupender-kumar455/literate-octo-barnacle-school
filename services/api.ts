@@ -308,6 +308,31 @@ export const getStudentPortalAnnouncements = async () => {
   return res.data;
 };
 
+export const getParentPortalStudents = async () => {
+  const res = await api.get("/parent/portal/students");
+  return res.data;
+};
+
+export const getParentPortalAnnouncements = async () => {
+  const res = await api.get("/parent/portal/announcements");
+  return res.data;
+};
+
+export const getParentPortalStudentAttendance = async (studentId: number | string) => {
+  const res = await api.get(`/parent/portal/students/${studentId}/attendance`);
+  return res.data;
+};
+
+export const getParentPortalStudentGrades = async (studentId: number | string) => {
+  const res = await api.get(`/parent/portal/students/${studentId}/grades`);
+  return res.data;
+};
+
+export const getParentPortalStudentFees = async (studentId: number | string) => {
+  const res = await api.get(`/parent/portal/students/${studentId}/fees`);
+  return res.data;
+};
+
 export const getStudentPortalNotifications = async (limit?: number) => {
   const res = await api.get("/student/portal/notifications", { params: { limit } });
   return res.data;
@@ -543,6 +568,86 @@ export const getAdminLeaves = async (params?: any) => {
 
 export const updateAdminLeaveStatus = async (id: number, payload: any) => {
   const res = await api.put(`/admin/leaves/${id}`, payload);
+  return res.data;
+};
+
+// Parent management (Admin)
+export const getAdminParents = async () => {
+  const res = await api.get('/admin/parents');
+  return res.data;
+};
+export const getAdminParent = async (id: number | string) => {
+  const res = await api.get(`/admin/parents/${id}`);
+  return res.data;
+};
+export const createAdminParent = async (payload: { name: string; email: string; password: string; phone?: string; address?: string }) => {
+  const res = await api.post('/admin/parents', payload);
+  return res.data;
+};
+export const updateAdminParent = async (id: number | string, payload: any) => {
+  const res = await api.put(`/admin/parents/${id}`, payload);
+  return res.data;
+};
+export const deleteAdminParent = async (id: number | string) => {
+  const res = await api.delete(`/admin/parents/${id}`);
+  return res.data;
+};
+export const linkStudentToParent = async (parentId: number | string, studentId: number | string, relationship?: string) => {
+  const res = await api.post(`/admin/parents/${parentId}/link-student`, { student_id: studentId, relationship: relationship || 'guardian' });
+  return res.data;
+};
+export const unlinkStudentFromParent = async (parentId: number | string, studentId: number | string) => {
+  const res = await api.delete(`/admin/parents/${parentId}/unlink-student/${studentId}`);
+  return res.data;
+};
+
+export const getChatParticipants = async () => {
+  const res = await api.get("/chat/participants");
+  return res.data;
+};
+
+export const getChatConversations = async (params?: { limit?: number }) => {
+  const res = await api.get("/chat/conversations", { params });
+  return res.data;
+};
+
+export const createChatConversation = async (payload: {
+  student_id: number | string;
+  teacher_id?: number | string;
+  parent_user_id?: number | string;
+}) => {
+  const res = await api.post("/chat/conversations", payload);
+  return res.data;
+};
+
+export const getChatMessages = async (
+  conversationId: number | string,
+  params?: { limit?: number; before_id?: number | string }
+) => {
+  const res = await api.get(`/chat/conversations/${conversationId}/messages`, { params });
+  return res.data;
+};
+
+export const sendChatMessage = async (
+  conversationId: number | string,
+  payload: { message: string }
+) => {
+  const res = await api.post(`/chat/conversations/${conversationId}/messages`, payload);
+  return res.data;
+};
+
+export const sendChatAttachment = async (
+  conversationId: number | string,
+  formData: FormData
+) => {
+  const res = await api.post(`/chat/conversations/${conversationId}/attachments`, formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return res.data;
+};
+
+export const markChatConversationRead = async (conversationId: number | string) => {
+  const res = await api.put(`/chat/conversations/${conversationId}/read`);
   return res.data;
 };
 
